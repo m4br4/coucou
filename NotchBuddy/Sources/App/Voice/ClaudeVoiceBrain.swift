@@ -65,13 +65,16 @@ final class ClaudeVoiceBrain {
 
             var results: [[String: Any]] = []
             var jarvisSpoken: [String] = []
+            var forget = false
             for use in uses {
                 let id = use["id"] as? String ?? ""
                 let name = use["name"] as? String ?? ""
                 let input = use["input"] as? [String: Any] ?? [:]
                 if name == "jarvis" {
-                    let answer = await JarvisVoice.handle(input)
+                    // `messages` already holds this round: a web result above the call counts.
+                    let answer = await JarvisVoice.handle(input, thirdParty: JarvisLink.hasThirdPartyText(messages))
                     jarvisSpoken.append(answer.spoken)
+                    if answer.forgetHistory { forget = true }
                     results.append(["type": "tool_result", "tool_use_id": id, "content": answer.toolResult])
                     continue
                 }
@@ -85,6 +88,7 @@ final class ClaudeVoiceBrain {
             if !jarvisSpoken.isEmpty {
                 spoken = jarvisSpoken.joined(separator: " ")
                 messages.append(["role": "assistant", "content": [["type": "text", "text": spoken]]])
+                if forget { messages = [] }
                 break
             }
         }

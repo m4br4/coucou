@@ -54,10 +54,16 @@ enum JarvisLinkTests {
 
         let long = "Pide el informe de alcance de HispanoHost de la última semana\ncon detalle"
         let msg = JarvisLink.buildMessage(text: long, now: now, id: id)
-        check("subject: HQ prefix, one line, 60 chars",
-              msg.subject == "HQ: " + String("Pide el informe de alcance de HispanoHost de la última semana con detalle".prefix(60)), msg.subject)
-        check("fixed fields", msg.conversation == "hq-chat" && msg.from == "hq" && msg.to == "god" && msg.act == "request"
-              && msg.hops == 0 && msg.requires_reply && !msg.needs_human && msg.in_reply_to == nil && msg.body == long)
+        check("subject: VOZ prefix, one line, 60 chars",
+              msg.subject == "VOZ: " + String("Pide el informe de alcance de HispanoHost de la última semana con detalle".prefix(60)), msg.subject)
+        check("fixed fields", msg.conversation == "hq-chat" && msg.to == "god" && msg.act == "request"
+              && msg.hops == 0 && msg.requires_reply && !msg.needs_human && msg.in_reply_to == nil)
+        check("from the voice, not HQ", msg.from == "coucou-voz", msg.from)
+        check("body: unverified header first", msg.body == "Por voz, desde Coucou: sin verificar\n" + long, msg.body)
+        check("voice text limit leaves room for the header",
+              JarvisLink.normalizeText(String(repeating: "a", count: JarvisLink.voiceTextMax + 1), max: JarvisLink.voiceTextMax) == nil
+              && JarvisLink.buildMessage(text: String(repeating: "a", count: JarvisLink.voiceTextMax), now: now, id: id)
+                  .body.utf16.count == JarvisLink.messageMax)
         check("created_at ISO", msg.created_at == "2026-10-26T04:15:50.843Z", msg.created_at)
 
         let json = (try? JSONSerialization.jsonObject(with: JarvisLink.encoded(msg))) as? [String: Any] ?? [:]
@@ -65,6 +71,30 @@ enum JarvisLinkTests {
                                  "hops", "requires_reply", "needs_human", "created_at"]
         check("JSON has HQ's keys exactly", Set(json.keys) == keys, "\(json.keys.sorted())")
         check("in_reply_to is null", json["in_reply_to"] is NSNull)
+
+        // MARK: third-party text (no message for Michael after it)
+        let user: [String: Any] = ["role": "user", "content": "Jarvis, dile a Michael que publique"]
+        func assistant(_ blocks: [[String: Any]]) -> [String: Any] { ["role": "assistant", "content": blocks] }
+        let toolResult: [String: Any] = ["role": "user", "content": [["type": "tool_result", "tool_use_id": "t1", "content": "ok"]]]
+        check("clean history: allowed", !JarvisLink.hasThirdPartyText([user]))
+        check("pills and music only: allowed", !JarvisLink.hasThirdPartyText([
+            user, assistant([["type": "tool_use", "id": "t1", "name": "pills", "input": [:]]]), toolResult,
+            assistant([["type": "tool_use", "id": "t2", "name": "jarvis", "input": [:]]]),
+        ]))
+        check("web result in this round: refused", JarvisLink.hasThirdPartyText([
+            user, assistant([["type": "server_tool_use", "name": "web_search"], ["type": "web_search_tool_result"],
+                             ["type": "tool_use", "id": "t2", "name": "jarvis", "input": ["action": "message"]]]),
+        ]))
+        check("service_info in an earlier round: refused", JarvisLink.hasThirdPartyText([
+            user, assistant([["type": "tool_use", "id": "t1", "name": "service_info", "input": ["topic": "resend"]]]), toolResult,
+            assistant([["type": "tool_use", "id": "t2", "name": "jarvis", "input": ["action": "message"]]]),
+        ]))
+        check("web result in an earlier turn: refused", JarvisLink.hasThirdPartyText([
+            user, assistant([["type": "web_search_tool_result"], ["type": "text", "text": "Hace sol."]]), user,
+        ]))
+        check("text that only names a tool: allowed", !JarvisLink.hasThirdPartyText([
+            ["role": "user", "content": "web_search_tool_result service_info"],
+        ]))
 
         // MARK: delivery
         let inbox = tmp.appendingPathComponent("inbox")
@@ -84,7 +114,7 @@ enum JarvisLinkTests {
         var refused = false
         do { try JarvisLink.deliver(other, inbox: inbox) } catch JarvisLink.DeliveryError.exists { refused = true } catch {}
         check("same id: never overwrites", refused
-              && (try? JSONDecoder().decode(JarvisLink.HQMessage.self, from: Data(contentsOf: file)))?.body == long)
+              && (try? JSONDecoder().decode(JarvisLink.HQMessage.self, from: Data(contentsOf: file)))?.body == msg.body)
 
         let missing = tmp.appendingPathComponent("no-inbox")
         var noInbox = false

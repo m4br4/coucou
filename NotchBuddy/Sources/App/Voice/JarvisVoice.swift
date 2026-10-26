@@ -86,14 +86,25 @@ enum JarvisVoice {
     struct Answer {
         let toolResult: String   // sent back to Claude
         let spoken: String       // read aloud as is: the turn ends with it
+        var forgetHistory = false // drop the conversation (it held third-party text)
     }
 
-    static func handle(_ input: [String: Any]) async -> Answer {
+    /// `thirdParty`: web search results or service data already reached Claude in this
+    /// conversation; a message for Michael is then refused (see JarvisLink.hasThirdPartyText).
+    static func handle(_ input: [String: Any], thirdParty: Bool) async -> Answer {
         JarvisTurn.set(true)
         switch input["action"] as? String ?? "" {
         case "status":  return await status(brand: input["brand"] as? String ?? "",
                                             question: input["question"] as? String ?? "")
-        case "message": return await message(input["text"] as? String ?? "")
+        case "message":
+            guard !thirdParty else {
+                // The history is dropped too, so asking again starts clean.
+                log("message: refused, third-party text in the conversation")
+                var answer = said("Pídemelo otra vez.")
+                answer.forgetHistory = true
+                return answer
+            }
+            return await message(input["text"] as? String ?? "")
         default:        return said("No te entendí qué le pido a Jarvis.")
         }
     }
@@ -144,7 +155,9 @@ enum JarvisVoice {
     // MARK: Message for Michael
 
     private static func message(_ raw: String) async -> Answer {
-        guard let text = JarvisLink.normalizeText(raw) else { return said("¿Qué le digo a Michael?") }
+        guard let text = JarvisLink.normalizeText(raw, max: JarvisLink.voiceTextMax) else {
+            return said("¿Qué le digo a Michael?")
+        }
         let now = Date()
         if let last = lastSent, now.timeIntervalSince(last) < minInterval {
             return said("Espera unos segundos antes de otro mensaje.")

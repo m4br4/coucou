@@ -9,14 +9,18 @@ import Foundation
 //
 // - A status question runs `pnpm estado <brand> "<question>" --voz` in Jarvis/fabrica
 //   (read-only); its ≤6 plain lines are read aloud as they are.
-// - Anything else becomes one message for Michael (god) in the hive, in the exact format
-//   HQ writes (Jarvis/hq/src/lib/server/chat.ts); his reply in hive/agents/god/hq-replies/
-//   is read aloud if it comes within a minute.
+// - Anything else becomes one message for Michael (god) in the hive, written like HQ's
+//   (Jarvis/hq/src/lib/server/chat.ts) but marked as coming from the voice, unverified;
+//   his reply in hive/agents/god/hq-replies/ is read aloud if it comes within a minute.
+//   It is never sent in a turn where third-party text (web search, service data) reached
+//   Claude: that text could have asked for it.
 // The question and the answers are never logged.
 enum JarvisLink {
     static let defaultFabricaPath = "~/Code/personal/Jarvis/fabrica"
     static let defaultHivePath    = "~/Code/personal/harness-home/hive"
     static let messageMax  = 4000      // HQ's CHAT_MAX
+    static let voiceFrom   = "coucou-voz"
+    static let voiceHeader = "Por voz, desde Coucou: sin verificar"
     static let questionMax = 500
     static let replyMax    = 20_000    // HQ's REPLY_MAX
     static let spokenLineMax = 6
@@ -194,7 +198,7 @@ enum JarvisLink {
 
     /// HQ's normalizeText: NFC, \n line ends, no control characters (but \n and \t), trimmed.
     /// nil when empty or longer than HQ accepts.
-    static func normalizeText(_ raw: String) -> String? {
+    static func normalizeText(_ raw: String, max: Int = messageMax) -> String? {
         let unified = raw.precomposedStringWithCanonicalMapping
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
@@ -204,15 +208,20 @@ enum JarvisLink {
             return !(v <= 0x1F || (0x7F...0x9F).contains(v) || v == 0x2028 || v == 0x2029)
         }
         let text = String(String.UnicodeScalarView(kept)).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, text.utf16.count <= messageMax else { return nil }
+        guard !text.isEmpty, text.utf16.count <= max else { return nil }
         return text
     }
 
+    /// What the voice may say once the header is added, within HQ's limit.
+    static var voiceTextMax: Int { messageMax - voiceHeader.utf16.count - 1 }
+
+    /// HQ's message, marked as the voice's: from coucou-voz, "VOZ: " subject, and a first
+    /// body line saying it is unverified. Same id shape, so the reply goes to hq-replies/.
     static func buildMessage(text: String, now: Date, id: String) -> HQMessage {
         let oneLine = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
-        return HQMessage(id: id, conversation: "hq-chat", in_reply_to: nil, from: "hq", to: "god",
-                         act: "request", subject: "HQ: \(oneLine.prefix(60))", body: text, hops: 0,
+        return HQMessage(id: id, conversation: "hq-chat", in_reply_to: nil, from: voiceFrom, to: "god",
+                         act: "request", subject: "VOZ: \(oneLine.prefix(60))", body: "\(voiceHeader)\n\(text)", hops: 0,
                          requires_reply: true, needs_human: false, created_at: isoString(now))
     }
 
@@ -254,6 +263,25 @@ enum JarvisLink {
         chmod(tmp, 0o600)
         guard link(tmp, final) == 0 else {
             throw errno == EEXIST ? DeliveryError.exists : DeliveryError.write(errno)
+        }
+    }
+
+    // MARK: Third-party text in the conversation
+
+    /// True when the history holds text Claude read from elsewhere: a web search result or
+    /// service_info data (emails, Notion pages, GitHub…). Such text may carry instructions,
+    /// so it must not lead to a message sent in Abraham's name.
+    static func hasThirdPartyText(_ messages: [[String: Any]]) -> Bool {
+        messages.contains { message in
+            guard message["role"] as? String == "assistant",
+                  let content = message["content"] as? [[String: Any]] else { return false }
+            return content.contains { block in
+                switch block["type"] as? String {
+                case "web_search_tool_result": return true
+                case "tool_use":               return block["name"] as? String == "service_info"
+                default:                       return false
+                }
+            }
         }
     }
 
