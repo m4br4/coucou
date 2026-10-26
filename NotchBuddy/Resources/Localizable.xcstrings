@@ -5949,67 +5949,67 @@
         "ar" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "يشغّله Jarvis على هذا الـMac فقط (127.0.0.1، منفذ العنوان)، دون تنزيل الوسائط، ويوقفه عند إغلاق Jarvis. تبقى جلسة واتساب في ‎~/Library/Application Support/Jarvis/GOWA."
+            "value" : "يشغّله Jarvis على هذا الـMac فقط (127.0.0.1، منفذ العنوان)، دون تنزيل الوسائط، ويوقفه عند إغلاق Jarvis. تبقى جلسة واتساب في ‎~/Library/Application Support/Coucou/GOWA."
           }
         },
         "bn" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Jarvis এটি শুধু এই Mac-এ চালায় (127.0.0.1, URL-এর পোর্ট), মিডিয়া ডাউনলোড ছাড়াই, এবং Jarvis বন্ধ হলে থামিয়ে দেয়। এর WhatsApp সেশন থাকে ~/Library/Application Support/Jarvis/GOWA-তে।"
+            "value" : "Jarvis এটি শুধু এই Mac-এ চালায় (127.0.0.1, URL-এর পোর্ট), মিডিয়া ডাউনলোড ছাড়াই, এবং Jarvis বন্ধ হলে থামিয়ে দেয়। এর WhatsApp সেশন থাকে ~/Library/Application Support/Coucou/GOWA-তে।"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Jarvis runs it on this Mac only (127.0.0.1, the URL’s port), without downloading media, and stops it when Jarvis quits. Its WhatsApp session stays in ~/Library/Application Support/Jarvis/GOWA."
+            "value" : "Jarvis runs it on this Mac only (127.0.0.1, the URL’s port), without downloading media, and stops it when Jarvis quits. Its WhatsApp session stays in ~/Library/Application Support/Coucou/GOWA."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Jarvis lo ejecuta solo en este Mac (127.0.0.1, el puerto de la URL), sin descargar archivos, y lo detiene al cerrar Jarvis. Su sesión de WhatsApp queda en ~/Library/Application Support/Jarvis/GOWA."
+            "value" : "Jarvis lo ejecuta solo en este Mac (127.0.0.1, el puerto de la URL), sin descargar archivos, y lo detiene al cerrar Jarvis. Su sesión de WhatsApp queda en ~/Library/Application Support/Coucou/GOWA."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Jarvis le lance sur ce Mac uniquement (127.0.0.1, le port de l’URL), sans télécharger les médias, et l’arrête quand Jarvis quitte. Sa session WhatsApp reste dans ~/Library/Application Support/Jarvis/GOWA."
+            "value" : "Jarvis le lance sur ce Mac uniquement (127.0.0.1, le port de l’URL), sans télécharger les médias, et l’arrête quand Jarvis quitte. Sa session WhatsApp reste dans ~/Library/Application Support/Coucou/GOWA."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Jarvis इसे सिर्फ़ इस Mac पर चलाता है (127.0.0.1, URL का पोर्ट), मीडिया डाउनलोड किए बिना, और Jarvis बंद होने पर रोक देता है। इसका WhatsApp सेशन ~/Library/Application Support/Jarvis/GOWA में रहता है।"
+            "value" : "Jarvis इसे सिर्फ़ इस Mac पर चलाता है (127.0.0.1, URL का पोर्ट), मीडिया डाउनलोड किए बिना, और Jarvis बंद होने पर रोक देता है। इसका WhatsApp सेशन ~/Library/Application Support/Coucou/GOWA में रहता है।"
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Jarvis menjalankannya hanya di Mac ini (127.0.0.1, port dari URL), tanpa mengunduh media, dan menghentikannya saat Jarvis ditutup. Sesi WhatsApp-nya ada di ~/Library/Application Support/Jarvis/GOWA."
+            "value" : "Jarvis menjalankannya hanya di Mac ini (127.0.0.1, port dari URL), tanpa mengunduh media, dan menghentikannya saat Jarvis ditutup. Sesi WhatsApp-nya ada di ~/Library/Application Support/Coucou/GOWA."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "O Jarvis o executa só neste Mac (127.0.0.1, a porta da URL), sem baixar mídias, e o encerra quando o Jarvis fecha. A sessão do WhatsApp fica em ~/Library/Application Support/Jarvis/GOWA."
+            "value" : "O Jarvis o executa só neste Mac (127.0.0.1, a porta da URL), sem baixar mídias, e o encerra quando o Jarvis fecha. A sessão do WhatsApp fica em ~/Library/Application Support/Coucou/GOWA."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Jarvis запускает его только на этом Mac (127.0.0.1, порт из адреса), без загрузки медиа, и останавливает при выходе. Сессия WhatsApp хранится в ~/Library/Application Support/Jarvis/GOWA."
+            "value" : "Jarvis запускает его только на этом Mac (127.0.0.1, порт из адреса), без загрузки медиа, и останавливает при выходе. Сессия WhatsApp хранится в ~/Library/Application Support/Coucou/GOWA."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Jarvis 仅在这台 Mac 上运行它（127.0.0.1，使用地址中的端口），不下载媒体，并在 Jarvis 退出时停止它。其 WhatsApp 会话保存在 ~/Library/Application Support/Jarvis/GOWA。"
+            "value" : "Jarvis 仅在这台 Mac 上运行它（127.0.0.1，使用地址中的端口），不下载媒体，并在 Jarvis 退出时停止它。其 WhatsApp 会话保存在 ~/Library/Application Support/Coucou/GOWA。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Jarvis 僅在這台 Mac 上執行閘道（127.0.0.1，使用網址指定的連接埠），不下載媒體，並在結束時停止閘道。WhatsApp 工作階段會保留在 ~/Library/Application Support/Jarvis/GOWA。"
+            "value" : "Jarvis 僅在這台 Mac 上執行閘道（127.0.0.1，使用網址指定的連接埠），不下載媒體，並在結束時停止閘道。WhatsApp 工作階段會保留在 ~/Library/Application Support/Coucou/GOWA。"
           }
         }
       }

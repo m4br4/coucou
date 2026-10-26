@@ -28,8 +28,10 @@ SPANISH = {"update.title %@": "Nueva versión de Coucou (upstream): %@"}
 
 # "OK Coucou" was the wake word; the fork's is the name alone.
 WAKE = re.compile(r"\b(?:OK|Ok|ok|Okay|okay)[   ]+Coucou\b")
+# Not inside a path: the app's folder stays ~/Library/Application Support/Coucou/.
+NAME = re.compile(r"(?<!/)Coucou(?!/)")
 # Arabic transliterates the name in a few strings.
-NAMES = ("Coucou", "كوكو")
+ARABIC = "كوكو"
 
 
 def brand_name():
@@ -41,9 +43,8 @@ def brand_name():
 
 def rebrand(value, name):
     value = WAKE.sub(name, value)
-    for old in NAMES:
-        value = value.replace(old, name)
-    return value
+    value = NAME.sub(name, value)
+    return value.replace(ARABIC, name)
 
 
 def upstream(value):
