@@ -57,6 +57,12 @@ struct IslandViewContent: View {
             #else
             EmptyView()
             #endif
+        case .jarvisApprovals:
+            #if !APPSTORE
+            JarvisApprovalsCardView()
+            #else
+            EmptyView()
+            #endif
         }
     }
 }

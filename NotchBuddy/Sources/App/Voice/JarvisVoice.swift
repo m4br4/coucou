@@ -20,11 +20,18 @@ enum JarvisTurn {
 
 enum JarvisSettings {
     static let fabricaKey = "jarvisFabricaPath"
+    static let vaultKey = "jarvisVaultPath"
 
     /// Jarvis's fabrica folder, where `pnpm estado` runs (Settings → Voice → Jarvis).
     static var fabricaPath: String {
         let v = UserDefaults.standard.string(forKey: fabricaKey) ?? ""
         return v.trimmingCharacters(in: .whitespaces).isEmpty ? JarvisLink.defaultFabricaPath : v
+    }
+
+    /// Jarvis's vault, watched for reports waiting for approval (Settings → Voice → Jarvis).
+    static var vaultPath: String {
+        let v = UserDefaults.standard.string(forKey: vaultKey) ?? ""
+        return v.trimmingCharacters(in: .whitespaces).isEmpty ? JarvisApprovals.defaultVaultPath : v
     }
 
     static var godInbox: URL { JarvisLink.expand(JarvisLink.defaultHivePath).appendingPathComponent("agents/god/inbox") }
@@ -33,6 +40,8 @@ enum JarvisSettings {
 
 struct JarvisSettingsBox: View {
     @AppStorage(JarvisSettings.fabricaKey) private var fabricaPath = JarvisLink.defaultFabricaPath
+    @AppStorage(JarvisSettings.vaultKey) private var vaultPath = JarvisApprovals.defaultVaultPath
+    @ObservedObject private var approvals = JarvisApprovalStore.shared
 
     var body: some View {
         GroupBox {
@@ -47,6 +56,24 @@ struct JarvisSettingsBox: View {
                     TextField(JarvisLink.defaultFabricaPath, text: $fabricaPath)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 320)
+                }
+                HStack(spacing: 10) {
+                    Text(verbatim: "Carpeta vault")
+                        .frame(width: 130, alignment: .leading)
+                    TextField(JarvisApprovals.defaultVaultPath, text: $vaultPath)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 320)
+                        .onSubmit { approvals.start() }
+                }
+                Text(verbatim: "Los informes «esperando-aprobacion» del vault abren «Aprobación de Jarvis» en el notch. Aprobar pide Touch ID o la contraseña del Mac.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    approvals.start()
+                    approvals.show()
+                } label: {
+                    Text(verbatim: approvals.pending.isEmpty ? "Ver aprobaciones" : "Ver aprobaciones (\(approvals.pending.count))")
                 }
             }
             .padding(6)
