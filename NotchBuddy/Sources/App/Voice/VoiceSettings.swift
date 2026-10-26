@@ -40,7 +40,10 @@ enum VoiceSettings {
         get { UserDefaults.standard.string(forKey: "voiceLanguage") ?? "en" }
         set { UserDefaults.standard.set(newValue, forKey: "voiceLanguage") }
     }
-    static var answerLocale: Locale { Locale(identifier: language == "fr" ? "fr-FR" : "en-US") }
+    static var answerLocale: Locale {
+        if JarvisTurn.isActive { return JarvisTurn.locale }   // "Jarvis, …" answers in Spanish
+        return Locale(identifier: language == "fr" ? "fr-FR" : "en-US")
+    }
 
     /// Language Coucou LISTENS to: "auto" (the Mac's dictation language, default), "en" or "fr".
     /// Independent from the answer language: speak French, hear English.

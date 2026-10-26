@@ -14,6 +14,8 @@ enum WakePhrase {
         /// (original casing, apostrophes, hyphens, accents preserved).
         /// Leading punctuation on the first word is stripped.
         let command: String
+        /// Woken by "Jarvis" (this fork) rather than "OK Coucou".
+        var jarvis = false
     }
 
     /// Scans `raw` for a wake phrase at a word boundary (anywhere in the transcript,
@@ -26,6 +28,7 @@ enum WakePhrase {
     ///
     /// Word-boundary search means "euh ok coucou add" matches and returns "add".
     /// Standalone "coucou" never matches (no preceding "ok"/"hey").
+    /// - "jarvis" (this fork), alone or after "ok"/"hey"/"oye": "Jarvis, ¿cómo va…?"
     static func split(_ raw: String) -> SplitResult {
         // Split original into whitespace-separated tokens (punctuation stays attached to words)
         let originalWords = raw.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
@@ -41,10 +44,12 @@ enum WakePhrase {
             ["ok",  "cou", "cou"],
             ["hey", "coucou"],
             ["hey", "cou", "cou"],
+            ["jarvis"],
         ]
 
         // Find LAST occurrence of any pattern
         var lastMatchEnd: Int? = nil   // word index immediately after the matched pattern
+        var lastIsJarvis = false
 
         for pattern in patterns {
             guard normWords.count >= pattern.count else { continue }
@@ -52,7 +57,10 @@ enum WakePhrase {
             while i <= normWords.count - pattern.count {
                 if Array(normWords[i ..< i + pattern.count]) == pattern {
                     let end = i + pattern.count
-                    if lastMatchEnd == nil || end > lastMatchEnd! { lastMatchEnd = end }
+                    if lastMatchEnd == nil || end > lastMatchEnd! {
+                        lastMatchEnd = end
+                        lastIsJarvis = pattern == ["jarvis"]
+                    }
                     i = end   // resume search after this match
                 } else {
                     i += 1
@@ -63,14 +71,14 @@ enum WakePhrase {
         guard let end = lastMatchEnd else { return SplitResult(matched: false, command: "") }
 
         let tail = Array(originalWords[end...])
-        guard !tail.isEmpty else { return SplitResult(matched: true, command: "") }
+        guard !tail.isEmpty else { return SplitResult(matched: true, command: "", jarvis: lastIsJarvis) }
 
         // Strip leading punctuation from the first command word
         var first = tail[0]
         while let c = first.first, !c.isLetter && !c.isNumber { first = String(first.dropFirst()) }
 
         let parts = ([first] + Array(tail.dropFirst())).filter { !$0.isEmpty }
-        return SplitResult(matched: true, command: parts.joined(separator: " "))
+        return SplitResult(matched: true, command: parts.joined(separator: " "), jarvis: lastIsJarvis)
     }
 
     /// Normalise a string for cancel-phrase comparison: lowercase + strip punctuation.
@@ -91,6 +99,8 @@ enum WakePhrase {
             .replacingOccurrences(of: "kuku",   with: "coucou")
             .replacingOccurrences(of: "kucou",  with: "coucou")
             .replacingOccurrences(of: "okay",   with: "ok")
+        // "Jarvis" as Spanish dictation may write it.
+        if ["yarvis", "jarvís", "járvis", "jarbis", "yarbis", "jervis"].contains(t) { t = "jarvis" }
         return t
     }
 }

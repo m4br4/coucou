@@ -598,6 +598,7 @@ final class VoiceEngine: ObservableObject {
         directInitialTimeout  = Self.wakeFirstWordTimeout
         audio?.bypassVAD      = true
         duckMusic()
+        JarvisTurn.set(WakePhrase.split(transcript).jarvis)
         appendAppLog("nb.log", "[Voice] wake")
         NotificationCenter.default.post(name: .voiceWoke, object: nil)
         resetSilenceTimer()

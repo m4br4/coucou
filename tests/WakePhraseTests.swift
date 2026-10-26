@@ -48,6 +48,18 @@ enum WakePhraseTests {
         checkMatch("ok coucou partial",      WakePhrase.split("ok coucou"),              cmd: "")
         checkMatch("ok coucou with more",    WakePhrase.split("ok coucou mets"),         cmd: "mets")
 
+        // "Jarvis" (this fork): alone or after ok/hey/oye, flagged as such
+        checkJarvis("Jarvis, ¿cómo va HispanoHost?",
+                    WakePhrase.split("Jarvis, ¿cómo va HispanoHost?"),          cmd: "cómo va HispanoHost?", jarvis: true)
+        checkJarvis("oye Jarvis pide el informe",
+                    WakePhrase.split("oye Jarvis pide el informe"),             cmd: "pide el informe", jarvis: true)
+        checkJarvis("ok jarvis alone",       WakePhrase.split("ok jarvis"),              cmd: "",              jarvis: true)
+        checkJarvis("Yarvis dictated",       WakePhrase.split("Yarvis qué tal"),         cmd: "qué tal",       jarvis: true)
+        checkJarvis("ok coucou not jarvis",  WakePhrase.split("ok coucou mets"),         cmd: "mets",          jarvis: false)
+        checkJarvis("last wake wins (coucou)",
+                    WakePhrase.split("jarvis no ok coucou ajoute GitHub"),      cmd: "ajoute GitHub", jarvis: false)
+        checkNoMatch("jarvisito",            WakePhrase.split("jarvisito"))
+
         // MARK: split — should NOT match
         checkNoMatch("standalone coucou",    WakePhrase.split("coucou"))
         checkNoMatch("standalone COUCOU",    WakePhrase.split("COUCOU"))
@@ -74,6 +86,14 @@ enum WakePhraseTests {
             print("✗  \(label) — matched ✓ but command \"\(r.command)\" ≠ \"\(cmd)\""); failures += 1; return
         }
         print("✓  \(label)")
+    }
+
+    static func checkJarvis(_ label: String, _ r: WakePhrase.SplitResult, cmd: String, jarvis: Bool) {
+        if r.matched && r.jarvis != jarvis {
+            total += 1
+            print("✗  \(label) — jarvis \(r.jarvis) ≠ \(jarvis)"); failures += 1; return
+        }
+        checkMatch(label, r, cmd: cmd)
     }
 
     static func checkNoMatch(_ label: String, _ r: WakePhrase.SplitResult) {

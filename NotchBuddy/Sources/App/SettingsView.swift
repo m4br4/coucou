@@ -1469,6 +1469,8 @@ struct SettingsView: View {
                 && VoiceSettings.speechStatus == .granted
         }
 
+        JarvisSettingsBox()
+
         GroupBox(String(localized: "Language")) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {

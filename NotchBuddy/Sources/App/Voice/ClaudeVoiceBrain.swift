@@ -64,16 +64,29 @@ final class ClaudeVoiceBrain {
             guard turn.stopReason == "tool_use", !uses.isEmpty else { break }
 
             var results: [[String: Any]] = []
+            var jarvisSpoken: [String] = []
             for use in uses {
                 let id = use["id"] as? String ?? ""
                 let name = use["name"] as? String ?? ""
                 let input = use["input"] as? [String: Any] ?? [:]
+                if name == "jarvis" {
+                    let answer = await JarvisVoice.handle(input)
+                    jarvisSpoken.append(answer.spoken)
+                    results.append(["type": "tool_result", "tool_use_id": id, "content": answer.toolResult])
+                    continue
+                }
                 let (result, didAct) = await run(tool: name, input: input)
                 if didAct { acted = true }
                 results.append(["type": "tool_result", "tool_use_id": id, "content": result])
             }
             messages.append(["role": "user", "content": results])
             spoken = ""
+            // Jarvis's answer is read as is, not retold by Claude: the turn ends with it.
+            if !jarvisSpoken.isEmpty {
+                spoken = jarvisSpoken.joined(separator: " ")
+                messages.append(["role": "assistant", "content": [["type": "text", "text": spoken]]])
+                break
+            }
         }
 
         let text = VoiceQuery.spokenText(spoken)
@@ -117,6 +130,7 @@ final class ClaudeVoiceBrain {
         let active = ([state.mainPillId] + Array(state.activeIntegrations))
             .compactMap { PillCatalog.definition(for: $0)?.name }
         let available = PillCatalog.available.map(\.name).joined(separator: ", ")
+        if JarvisTurn.isActive { return JarvisVoice.systemPrompt(active: active, available: available) }
         let language = fr ? "French" : "English"
         return """
         You are Coucou, a voice assistant living in the notch of the user's Mac, a bit like Jarvis: \
@@ -205,6 +219,7 @@ final class ClaudeVoiceBrain {
                 "required": ["recipient", "subject", "body"],
             ],
         ],
+        JarvisVoice.tool,
         webSearchTool,
     ]
 
