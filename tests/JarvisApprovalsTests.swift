@@ -63,6 +63,17 @@ enum JarvisApprovalsTests {
         check("multi-line pattern can't be approved", J.permiteProblem(["^a$\npermite: [\".*\"]"]) != nil)
         check("too many patterns", J.permiteProblem(Array(repeating: "^a$", count: 21)) != nil)
         check("valid permite", J.permiteProblem(["^a$"]) == nil)
+        for (name, scalar) in [("U+200B zero-width space", "\u{200B}"), ("U+200F right-to-left mark", "\u{200F}"),
+                               ("U+202A LTR embedding", "\u{202A}"), ("U+202E RTL override", "\u{202E}"),
+                               ("U+2066 LTR isolate", "\u{2066}"), ("U+2069 pop isolate", "\u{2069}"),
+                               ("U+FEFF BOM", "\u{FEFF}")] {
+            check("invisible \(name) refused", J.permiteProblem(["^git push origin \(scalar)main$"]) != nil)
+        }
+        check("accents and ñ allowed", J.permiteProblem(["^echo año ñandú café$"]) == nil)
+
+        check("approve: list fits", J.canApprove(contentFits: true, reachedEnd: false))
+        check("approve: scrolled to the end", J.canApprove(contentFits: false, reachedEnd: true))
+        check("approve off: hidden patterns not seen", !J.canApprove(contentFits: false, reachedEnd: false))
 
         // MARK: report list
         let informes = J.informesDir(vault)

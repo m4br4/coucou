@@ -178,6 +178,9 @@ struct JarvisApprovalsCardView: View {
     @ObservedObject private var store = JarvisApprovalStore.shared
     @State private var rejecting = false
     @State private var motivo = ""
+    // Whether every permite pattern was on screen (JarvisApprovals.canApprove).
+    @State private var permiteFits = false
+    @State private var permiteSeenToEnd = false
     @FocusState private var motivoFocused: Bool
 
     var body: some View {
@@ -191,7 +194,10 @@ struct JarvisApprovalsCardView: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onChange(of: store.current?.id) { _, _ in rejecting = false; motivo = "" }
+        .onChange(of: store.current?.id) { _, _ in
+            rejecting = false; motivo = ""
+            permiteFits = false; permiteSeenToEnd = false
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -220,9 +226,11 @@ struct JarvisApprovalsCardView: View {
                 }
             } else {
                 HStack(spacing: 8) {
-                    PrimaryButton(verbatim: "Aprobar") { Task { await store.approve(report) } }
-                        .disabled(!report.permiteIsValid || store.busy)
-                        .opacity(report.permiteIsValid && !store.busy ? 1 : 0.4)
+                    let enabled = report.permiteIsValid && !store.busy
+                        && JarvisApprovals.canApprove(contentFits: permiteFits, reachedEnd: permiteSeenToEnd)
+                    PrimaryButton(verbatim: "Aprobar") { if enabled { Task { await store.approve(report) } } }
+                        .disabled(!enabled)
+                        .opacity(enabled ? 1 : 0.4)
                     SecondaryButton(verbatim: "Rechazar") { rejecting = true }
                     if store.pending.count > 1 { SecondaryButton(verbatim: "Siguiente") { store.next() } }
                     SecondaryButton(verbatim: "Luego") { store.later() }
@@ -239,10 +247,12 @@ struct JarvisApprovalsCardView: View {
         Task { if await store.reject(report, motivo: motivo) { rejecting = false; motivo = "" } }
     }
 
+    static let permiteBoxHeight: CGFloat = 54
+
     /// The `permite:` patterns exactly as they will be written.
     @ViewBuilder private func permite(_ report: JarvisApprovals.Report) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(verbatim: "permite:")
+            Text(verbatim: report.permite.count == 1 ? "permite: 1 patrón" : "permite: \(report.permite.count) patrones")
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundColor(Color(hex: "#8E939C"))
             if report.permite.isEmpty {
@@ -259,9 +269,25 @@ struct JarvisApprovalsCardView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // The list's own height, measured on appear (always called) and on change.
+                    .background(GeometryReader { proxy in
+                        Color.clear
+                            .onAppear { permiteFits = proxy.size.height <= Self.permiteBoxHeight + 0.5 }
+                            .onChange(of: proxy.size.height) { _, h in permiteFits = h <= Self.permiteBoxHeight + 0.5 }
+                    })
                 }
-                .frame(maxHeight: 54)
-                if let problem = JarvisApprovals.permiteProblem(report.permite) { line(problem) }
+                .frame(maxHeight: Self.permiteBoxHeight)
+                .scrollIndicators(.visible)
+                .onScrollGeometryChange(for: Bool.self) { geo in
+                    geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 1
+                } action: { _, atEnd in
+                    if atEnd { permiteSeenToEnd = true }   // once seen, stays seen
+                }
+                if let problem = JarvisApprovals.permiteProblem(report.permite) {
+                    line(problem)
+                } else if !JarvisApprovals.canApprove(contentFits: permiteFits, reachedEnd: permiteSeenToEnd) {
+                    line("Baja hasta el último patrón para poder aprobar.")
+                }
             }
         }
     }

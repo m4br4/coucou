@@ -92,8 +92,22 @@ enum JarvisApprovals {
         for p in permite {
             if p.trimmingCharacters(in: .whitespaces).isEmpty { return "Hay un patrón vacío." }
             if p.count > maxPatternLength || hasControl(p) { return "Hay un patrón demasiado largo o con saltos de línea." }
+            if hasInvisibleFormat(p) { return "Hay un patrón con caracteres invisibles." }
         }
         return nil
+    }
+
+    /// Invisible format characters (Unicode category Cf: zero-width spaces and joiners,
+    /// bidi marks, embeddings and isolates, BOM…): a pattern that reads one way on screen
+    /// and matches another.
+    static func hasInvisibleFormat(_ s: String) -> Bool {
+        s.unicodeScalars.contains { $0.properties.generalCategory == .format }
+    }
+
+    /// Approve stays off until every pattern was on screen: the list fits in its box, or it
+    /// was scrolled to the end.
+    static func canApprove(contentFits: Bool, reachedEnd: Bool) -> Bool {
+        contentFits || reachedEnd
     }
 
     /// Every .md under informes/, skipping names starting with "." or "_" (templates, used
