@@ -14,7 +14,7 @@ enum WakePhrase {
         /// (original casing, apostrophes, hyphens, accents preserved).
         /// Leading punctuation on the first word is stripped.
         let command: String
-        /// Woken by "Jarvis" (this fork) rather than "OK Coucou".
+        /// Woken by "Jarvis" (this fork's wake word) rather than "OK Coucou".
         var jarvis = false
     }
 
@@ -23,13 +23,14 @@ enum WakePhrase {
     /// preserving the original casing and punctuation of the command portion.
     ///
     /// Accepted patterns (case-insensitive, after phonetic normalisation):
-    /// - "ok coucou" and variants: "okay coucou", "ok cuckoo", "ok kuku", "ok cou cou" …
-    /// - "hey coucou"
+    /// - "jarvis" (this fork's wake word), alone or after "ok"/"hey"/"oye": "Jarvis, ¿cómo va…?"
+    /// - only when `coucou` is on (Settings → Voice, "Also answer to Coucou"):
+    ///   "ok coucou" and variants: "okay coucou", "ok cuckoo", "ok kuku", "ok cou cou" …
+    ///   and "hey coucou"
     ///
     /// Word-boundary search means "euh ok coucou add" matches and returns "add".
     /// Standalone "coucou" never matches (no preceding "ok"/"hey").
-    /// - "jarvis" (this fork), alone or after "ok"/"hey"/"oye": "Jarvis, ¿cómo va…?"
-    static func split(_ raw: String) -> SplitResult {
+    static func split(_ raw: String, coucou: Bool = false) -> SplitResult {
         // Split original into whitespace-separated tokens (punctuation stays attached to words)
         let originalWords = raw.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         guard !originalWords.isEmpty else { return SplitResult(matched: false, command: "") }
@@ -39,13 +40,13 @@ enum WakePhrase {
 
         // Wake phrase patterns (normalised).
         // "ok cou cou" handled as a 3-token pattern in case the STT splits it.
-        let patterns: [[String]] = [
+        let coucouPatterns: [[String]] = [
             ["ok",  "coucou"],
             ["ok",  "cou", "cou"],
             ["hey", "coucou"],
             ["hey", "cou", "cou"],
-            ["jarvis"],
         ]
+        let patterns = [["jarvis"]] + (coucou ? coucouPatterns : [])
 
         // Find LAST occurrence of any pattern
         var lastMatchEnd: Int? = nil   // word index immediately after the matched pattern

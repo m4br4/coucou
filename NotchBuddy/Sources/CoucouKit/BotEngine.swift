@@ -1124,7 +1124,16 @@ final class BotEngine: ObservableObject {
 
     // MARK: - Draw
 
+    /// The one place to swap Mochi for another character (JV-5f, "personaje propio").
+    /// Every Mochi on screen (notch, desktop, Flow, weekly recap, iPhone) draws his body
+    /// through `draw(context:size:)`; set this to draw yours in the same canvas instead
+    /// (the engine gives the mood, gaze and state). Hands, outfits and particles are other
+    /// layers: drawHandsBehind, drawOutfitBehind/Front and drawHandsAndExtras.
+    /// nil = Mochi, the author's character.
+    static let customCharacter: ((GraphicsContext, CGSize, BotEngine) -> Void)? = nil
+
     func draw(context: GraphicsContext, size: CGSize) {
+        if let custom = Self.customCharacter { custom(context, size, self); return }
         let W = size.width
         let H = size.height
         let R = W * 0.3

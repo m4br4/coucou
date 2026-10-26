@@ -5,6 +5,11 @@ import AppKit
 struct NotchBuddyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
+    init() {
+        // Before anything is localized: this fork runs in Spanish unless a language was picked.
+        Brand.applyDefaultLanguage()
+    }
+
     var body: some Scene {
         Settings {
             SettingsView()

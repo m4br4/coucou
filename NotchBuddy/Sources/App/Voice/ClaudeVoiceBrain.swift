@@ -137,7 +137,7 @@ final class ClaudeVoiceBrain {
         if JarvisTurn.isActive { return JarvisVoice.systemPrompt(active: active, available: available) }
         let language = fr ? "French" : "English"
         return """
-        You are Coucou, a voice assistant living in the notch of the user's Mac, a bit like Jarvis: \
+        You are \(Brand.name), a voice assistant living in the notch of the user's Mac: \
         quick, warm, a little playful. It is \(today).
         Everything you write is read aloud: answer in \(language) (the user may speak French or English), \
         in one or two short sentences, no markdown, no lists, no emojis, no links.

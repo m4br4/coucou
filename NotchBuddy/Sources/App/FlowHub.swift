@@ -177,7 +177,7 @@ final class FlowHubController {
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
                            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                            backing: .buffered, defer: false)
-        win.title = "Coucou"
+        win.title = Brand.name
         win.titlebarAppearsTransparent = true
         win.titleVisibility = .hidden
         win.appearance = NSAppearance(named: .darkAqua)
@@ -258,7 +258,7 @@ private struct HubSidebar: View {
                 // hops and hats): lifted so his body lines up with the name.
                 HubLiveMochi(size: 28)
                     .offset(y: -4)
-                Text(verbatim: "Coucou")
+                Text(verbatim: Brand.name)
                     .font(.system(size: 18, weight: .bold))
             }
             .padding(.horizontal, 8)

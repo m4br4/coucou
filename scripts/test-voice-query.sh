@@ -8,5 +8,6 @@ swiftc -o /tmp/voice-query-tests \
   NotchBuddy/Sources/App/Voice/EntityResolver.swift \
   NotchBuddy/Sources/App/Voice/IntentParser.swift \
   NotchBuddy/Sources/App/Voice/VoiceQuery.swift \
+  NotchBuddy/Sources/App/Brand.swift \
   tests/VoiceQueryTests.swift
 /tmp/voice-query-tests

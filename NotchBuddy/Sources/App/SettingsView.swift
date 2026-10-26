@@ -1392,7 +1392,8 @@ struct SettingsView: View {
     @State private var voicePermissionsGranted: Bool = false
     @ObservedObject private var voiceEngine = VoiceEngine.shared
     @AppStorage("voiceLanguage")       private var voiceLanguage: String = "en"
-    @AppStorage("voiceListenLanguage") private var listenLanguage: String = "auto"
+    @AppStorage("voiceListenLanguage") private var listenLanguage: String = "es"
+    @AppStorage(VoiceSettings.coucouWakeKey) private var coucouWake: Bool = false
     @AppStorage("voiceTTSEngine")      private var ttsEngine: String = "system"
     @AppStorage("voiceElevenGender")   private var elevenGender: String = "female"
     @AppStorage("voicePitchFemale")    private var pitchFemale: Double = VoiceSettings.defaultPitchFemale
@@ -1402,10 +1403,9 @@ struct SettingsView: View {
     @State private var elevenKeySaved: Bool = KeychainStore.shared.get(ElevenLabsTTS.keyName) != nil
 
     private func speakVoiceSample() {
-        let en = voiceLanguage != "fr"
-        VoiceSpeaker.shared.speak(en ? "Hi, I'm Coucou. Say OK Coucou whenever you need me."
-                                     : "Salut, c'est Coucou. Dis OK Coucou quand tu as besoin de moi.",
-                                  locale: Locale(identifier: en ? "en-US" : "fr-FR"))
+        // "Jarvis, …" turns answer in Spanish: the sample is the voice they use.
+        VoiceSpeaker.shared.speak("Hola, soy \(Brand.name). Di «\(Brand.name)» cuando me necesites.",
+                                  locale: JarvisTurn.locale)
     }
 
     @ViewBuilder private var voiceSection: some View {
@@ -1418,6 +1418,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle(String(localized: "Enable voice command"), isOn: $voiceEngine.isEnabled)
                     .disabled(!voicePermissionsGranted && !voiceEngine.isEnabled)
+                Toggle(isOn: $coucouWake) { Text(verbatim: "Responder también a Coucou («OK Coucou»)") }
 
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: webKeySaved ? "checkmark.circle.fill" : "exclamationmark.circle")
@@ -1478,12 +1479,13 @@ struct SettingsView: View {
                         .frame(width: 130, alignment: .leading)
                     Picker(String(localized: "voice.listen-language"), selection: $listenLanguage) {
                         Text(String(localized: "voice.lang-auto")).tag("auto")
+                        Text(verbatim: "Español").tag("es")
                         Text(verbatim: "Français").tag("fr")
                         Text(verbatim: "English").tag("en")
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 260)
+                    .frame(maxWidth: 340)
                 }
                 HStack(spacing: 10) {
                     Text(String(localized: "voice.language"))
@@ -1551,8 +1553,7 @@ struct SettingsView: View {
                                })
                         .frame(maxWidth: 180)
                     }
-                    let current = VoiceSpeaker.macVoiceName(for: Locale(identifier: voiceLanguage == "fr" ? "fr-FR" : "en-US"),
-                                                            gender: elevenGender)
+                    let current = VoiceSpeaker.macVoiceName(for: JarvisTurn.locale, gender: elevenGender)
                     Text(String(format: String(localized: "voice.mac-voice-current %@"), current))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)

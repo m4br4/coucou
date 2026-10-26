@@ -113,9 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupMenuBarItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = statusItem?.button else { return }
-        button.image = NSImage(named: "MenuBarIcon") ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Coucou")
+        button.image = NSImage(named: "MenuBarIcon") ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: Brand.name)
         button.image?.size = NSSize(width: 24, height: 18)
-        button.image?.accessibilityDescription = "Coucou"
+        button.image?.accessibilityDescription = Brand.name
         button.image?.isTemplate = true
 
         let menu = NSMenu()
@@ -168,10 +168,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),
                                          bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                          colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else {
-            let icon = NSImage(named: "MenuBarIcon") ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Coucou")
+            let icon = NSImage(named: "MenuBarIcon") ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: Brand.name)
             icon?.size = size
             icon?.isTemplate = true
-            icon?.accessibilityDescription = "Coucou"
+            icon?.accessibilityDescription = Brand.name
             button.image = icon
             return
         }
@@ -186,7 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let blue = NSImage(size: size)
         blue.addRepresentation(rep)
         blue.isTemplate = false
-        blue.accessibilityDescription = "Coucou"
+        blue.accessibilityDescription = Brand.name
         button.image = blue
     }
     #endif

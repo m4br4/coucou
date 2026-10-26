@@ -227,7 +227,7 @@ enum JarvisVoice {
         let today = Date().formatted(.dateTime.weekday(.wide).day().month(.wide).year().hour().minute()
             .locale(Locale(identifier: "es_MX")))
         return """
-        Eres Jarvis, el asistente de voz de Abraham. Vives en el notch de su Mac, dentro de la app Coucou: \
+        Eres Jarvis, el asistente de voz de Abraham. Vives en el notch de su Mac: \
         rápido, cercano y al grano. Hoy es \(today).
         Todo lo que escribes se lee en voz alta: contesta siempre en español, en una o dos frases cortas, \
         sin markdown, listas, emojis ni enlaces.

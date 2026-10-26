@@ -98,7 +98,8 @@ final class WakeSpotter: @unchecked Sendable {
             req.shouldReportPartialResults  = true
             req.requiresOnDeviceRecognition = true
             let extra = startInCommandPhase ? additionalContextualStrings : [String]()
-            req.contextualStrings = ["Coucou", "OK Coucou", "okay Coucou", "hey Coucou", "Jarvis", "oye Jarvis"] + extra
+            let coucou = VoiceSettings.coucouWake ? ["Coucou", "OK Coucou", "okay Coucou", "hey Coucou"] : []
+            req.contextualStrings = ["Jarvis", "oye Jarvis", "ok Jarvis", "hey Jarvis"] + coucou + extra
             preroll.forEach { req.append($0) }
 
             recognizer   = r
@@ -189,13 +190,13 @@ final class WakeSpotter: @unchecked Sendable {
                     if words.contains(where: { w in
                         ["cou", "kou", "kuku", "cuck", "koukou", "coco"].contains { w.contains($0) }
                     }) { nearWake = true }
-                    let r = WakePhrase.split(transcript)
+                    let r = WakePhrase.split(transcript, coucou: VoiceSettings.coucouWake)
                     if r.matched {
                         phase = .command
                         return .woke(transcript)
                     }
                 case .command:
-                    let r = WakePhrase.split(transcript)
+                    let r = WakePhrase.split(transcript, coucou: VoiceSettings.coucouWake)
                     return .commandUpdate(r.matched ? r.command : transcript)
                 }
             }

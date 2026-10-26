@@ -9,6 +9,7 @@ swiftc -swift-version 6 -strict-concurrency=complete \
     "$ROOT/NotchBuddy/Sources/App/Voice/VoiceIntent.swift" \
     "$ROOT/NotchBuddy/Sources/App/Voice/IntentParser.swift" \
     "$ROOT/NotchBuddy/Sources/App/Voice/VoiceQuery.swift" \
+    "$ROOT/NotchBuddy/Sources/App/Brand.swift" \
     "$ROOT/NotchBuddy/Sources/App/Voice/EntityResolver.swift" \
     "$ROOT/NotchBuddy/Sources/App/Voice/ConversationContext.swift" \
     "$ROOT/tests/ConversationContextTests.swift" \

@@ -45,11 +45,18 @@ enum VoiceSettings {
         return Locale(identifier: language == "fr" ? "fr-FR" : "en-US")
     }
 
-    /// Language Coucou LISTENS to: "auto" (the Mac's dictation language, default), "en" or "fr".
-    /// Independent from the answer language: speak French, hear English.
+    /// Language Coucou LISTENS to: "es" (this fork's default), "auto" (the Mac's dictation
+    /// language), "en" or "fr". Independent from the answer language: speak French, hear English.
     static var listenLanguage: String {
-        get { UserDefaults.standard.string(forKey: "voiceListenLanguage") ?? "auto" }
+        get { UserDefaults.standard.string(forKey: "voiceListenLanguage") ?? "es" }
         set { UserDefaults.standard.set(newValue, forKey: "voiceListenLanguage") }
+    }
+
+    /// Also wake on «OK Coucou» / «hey Coucou», besides «Jarvis» (Settings → Voice). Default: off.
+    static let coucouWakeKey = "voiceWakeCoucou"
+    static var coucouWake: Bool {
+        get { UserDefaults.standard.bool(forKey: coucouWakeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: coucouWakeKey) }
     }
 
     /// Coucou already offered to answer in the language you speak (asked once).

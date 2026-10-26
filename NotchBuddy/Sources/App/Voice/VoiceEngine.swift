@@ -598,7 +598,7 @@ final class VoiceEngine: ObservableObject {
         directInitialTimeout  = Self.wakeFirstWordTimeout
         audio?.bypassVAD      = true
         duckMusic()
-        JarvisTurn.set(WakePhrase.split(transcript).jarvis)
+        JarvisTurn.set(WakePhrase.split(transcript, coucou: VoiceSettings.coucouWake).jarvis)
         appendAppLog("nb.log", "[Voice] wake")
         NotificationCenter.default.post(name: .voiceWoke, object: nil)
         resetSilenceTimer()
@@ -703,6 +703,7 @@ final class VoiceEngine: ObservableObject {
         // dictation languages first. The answer language is separate (VoiceSettings.language).
         var candidates: [Locale]
         switch VoiceSettings.listenLanguage {
+        case "es": candidates = [Locale(identifier: "es-MX"), Locale(identifier: "es-US"), Locale(identifier: "es-ES")]
         case "fr": candidates = [Locale(identifier: "fr-FR"), Locale(identifier: "fr-CA")]
         case "en": candidates = [Locale(identifier: "en-US"), Locale(identifier: "en-GB"), Locale(identifier: "en-AU")]
         default:   candidates = []
