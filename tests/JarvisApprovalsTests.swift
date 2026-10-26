@@ -75,6 +75,17 @@ enum JarvisApprovalsTests {
         check("approve: scrolled to the end", J.canApprove(contentFits: false, reachedEnd: true))
         check("approve off: hidden patterns not seen", !J.canApprove(contentFits: false, reachedEnd: false))
 
+        let seen2 = J.Report(id: "JV-1", titulo: "t", informe: "vault/informes/a.md", permite: ["^a$", "^b$"], decision: .pendiente)
+        let grown = J.Report(id: "JV-1", titulo: "t", informe: "vault/informes/a.md",
+                             permite: ["^a$", "^b$"] + (1...18).map { "^c\($0)$" }, decision: .pendiente)
+        let retitled = J.Report(id: "JV-1", titulo: "otra", informe: "vault/informes/a.md", permite: seen2.permite, decision: .pendiente)
+        check("same report seen: may approve", J.mayApprove(seen: seen2, current: seen2))
+        check("permite grew under the same id: refused", seen2 != grown && seen2.hashValue != grown.hashValue
+              && !J.mayApprove(seen: seen2, current: grown))
+        check("title changed under the same id: refused", !J.mayApprove(seen: seen2, current: retitled))
+        check("nothing seen yet: refused", !J.mayApprove(seen: nil, current: seen2))
+        check("no report shown: refused", !J.mayApprove(seen: seen2, current: nil))
+
         // MARK: report list
         let informes = J.informesDir(vault)
         write(template, informes.appendingPathComponent("devops/2026-10-25-merge.md"))

@@ -111,12 +111,25 @@ final class JarvisApprovalStore: ObservableObject {
 
     // MARK: Decisions
 
-    func approve(_ report: JarvisApprovals.Report) async {
+    /// `seen`: the report whose whole permite list was on screen. Approved only while it is
+    /// still the one shown (checked again after Touch ID: a rescan may land during the
+    /// prompt); then JarvisApprovals.approve checks it against the file and writes `seen`'s
+    /// own permite.
+    func approve(_ seen: JarvisApprovals.Report) async {
         guard !busy else { return }
+        guard JarvisApprovals.mayApprove(seen: seen, current: current) else {
+            status = "El informe cambió: revisa los patrones otra vez."
+            return
+        }
         busy = true
         defer { busy = false }
+        let report = seen
         guard await Self.ownerConfirms(reason: "aprobar \(report.id) de Jarvis") else {
             status = "Sin Touch ID o contraseña no se aprueba nada."
+            return
+        }
+        guard JarvisApprovals.mayApprove(seen: report, current: current) else {
+            status = "El informe cambió durante Touch ID: revisa los patrones otra vez."
             return
         }
         let vault = vault
@@ -178,9 +191,9 @@ struct JarvisApprovalsCardView: View {
     @ObservedObject private var store = JarvisApprovalStore.shared
     @State private var rejecting = false
     @State private var motivo = ""
-    // Whether every permite pattern was on screen (JarvisApprovals.canApprove).
-    @State private var permiteFits = false
-    @State private var permiteSeenToEnd = false
+    // The report whose whole permite list was on screen (it fit, or was scrolled to the end).
+    // Approve needs it to equal the report shown now (JarvisApprovals.mayApprove).
+    @State private var seen: JarvisApprovals.Report?
     @FocusState private var motivoFocused: Bool
 
     var body: some View {
@@ -194,10 +207,7 @@ struct JarvisApprovalsCardView: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onChange(of: store.current?.id) { _, _ in
-            rejecting = false; motivo = ""
-            permiteFits = false; permiteSeenToEnd = false
-        }
+        .onChange(of: store.current?.id) { _, _ in rejecting = false; motivo = "" }
     }
 
     @ViewBuilder private var content: some View {
@@ -227,8 +237,11 @@ struct JarvisApprovalsCardView: View {
             } else {
                 HStack(spacing: 8) {
                     let enabled = report.permiteIsValid && !store.busy
-                        && JarvisApprovals.canApprove(contentFits: permiteFits, reachedEnd: permiteSeenToEnd)
-                    PrimaryButton(verbatim: "Aprobar") { if enabled { Task { await store.approve(report) } } }
+                        && JarvisApprovals.mayApprove(seen: seen, current: report)
+                    PrimaryButton(verbatim: "Aprobar") {
+                        // The report that was seen, never the latest one.
+                        if enabled, let seen { Task { await store.approve(seen) } }
+                    }
                         .disabled(!enabled)
                         .opacity(enabled ? 1 : 0.4)
                     SecondaryButton(verbatim: "Rechazar") { rejecting = true }
@@ -248,6 +261,11 @@ struct JarvisApprovalsCardView: View {
     }
 
     static let permiteBoxHeight: CGFloat = 54
+
+    private func markSeen(_ report: JarvisApprovals.Report, contentHeight: CGFloat, atEnd: Bool) {
+        let fits = contentHeight > 0 && contentHeight <= Self.permiteBoxHeight + 0.5
+        if JarvisApprovals.canApprove(contentFits: fits, reachedEnd: atEnd) { seen = report }
+    }
 
     /// The `permite:` patterns exactly as they will be written.
     @ViewBuilder private func permite(_ report: JarvisApprovals.Report) -> some View {
@@ -270,22 +288,26 @@ struct JarvisApprovalsCardView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     // The list's own height, measured on appear (always called) and on change.
+                    // `report` here is the one these rows show: that is what gets marked seen.
                     .background(GeometryReader { proxy in
                         Color.clear
-                            .onAppear { permiteFits = proxy.size.height <= Self.permiteBoxHeight + 0.5 }
-                            .onChange(of: proxy.size.height) { _, h in permiteFits = h <= Self.permiteBoxHeight + 0.5 }
+                            .onAppear { markSeen(report, contentHeight: proxy.size.height, atEnd: false) }
+                            .onChange(of: proxy.size.height) { _, h in markSeen(report, contentHeight: h, atEnd: false) }
                     })
                 }
                 .frame(maxHeight: Self.permiteBoxHeight)
                 .scrollIndicators(.visible)
                 .onScrollGeometryChange(for: Bool.self) { geo in
-                    geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 1
+                    geo.contentSize.height > 0
+                        && geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 1
                 } action: { _, atEnd in
-                    if atEnd { permiteSeenToEnd = true }   // once seen, stays seen
+                    markSeen(report, contentHeight: 0, atEnd: atEnd)
                 }
+                // A new or changed report is a new list: measured and scrolled from the top again.
+                .id(report)
                 if let problem = JarvisApprovals.permiteProblem(report.permite) {
                     line(problem)
-                } else if !JarvisApprovals.canApprove(contentFits: permiteFits, reachedEnd: permiteSeenToEnd) {
+                } else if !JarvisApprovals.mayApprove(seen: seen, current: report) {
                     line("Baja hasta el último patrón para poder aprobar.")
                 }
             }

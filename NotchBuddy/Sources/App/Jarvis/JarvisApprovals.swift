@@ -22,7 +22,7 @@ enum JarvisApprovals {
     static let maxPatternLength = 300
     static let motivoMax = 2000
 
-    struct Report: Equatable, Identifiable, Sendable {
+    struct Report: Hashable, Identifiable, Sendable {
         let id: String
         let titulo: String      // the report's "# " heading: the APROBADO's accion
         let informe: String     // path relative to the vault's parent (as HQ shows it)
@@ -108,6 +108,13 @@ enum JarvisApprovals {
     /// was scrolled to the end.
     static func canApprove(contentFits: Bool, reachedEnd: Bool) -> Bool {
         contentFits || reachedEnd
+    }
+
+    /// The report whose whole list was seen is still the one shown, field for field (id,
+    /// title, path, permite): any change to the report means it must be seen again.
+    static func mayApprove(seen: Report?, current: Report?) -> Bool {
+        guard let seen, let current else { return false }
+        return seen == current
     }
 
     /// Every .md under informes/, skipping names starting with "." or "_" (templates, used
@@ -278,7 +285,8 @@ enum JarvisApprovals {
     static func approve(_ shown: Report, vault: URL, now: Date = Date()) throws -> String {
         let report = try current(shown, vault: vault)
         let name = "APROBADO-\(report.id).md"
-        try writeOnce(try approvalContent(report, now: now), named: name, in: aprobacionesDir(vault))
+        // Written from what was shown (equal to the file's, checked just above).
+        try writeOnce(try approvalContent(shown, now: now), named: name, in: aprobacionesDir(vault))
         logDecision("APROBADO \(report.id)", report: report, detail: "permite: \(permiteLine(report.permite))", vault: vault, now: now)
         return name
     }
