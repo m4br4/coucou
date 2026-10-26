@@ -1391,7 +1391,7 @@ struct SettingsView: View {
     #if !APPSTORE
     @State private var voicePermissionsGranted: Bool = false
     @ObservedObject private var voiceEngine = VoiceEngine.shared
-    @AppStorage("voiceLanguage")       private var voiceLanguage: String = "en"
+    @AppStorage("voiceLanguage")       private var voiceLanguage: String = "es"
     @AppStorage("voiceListenLanguage") private var listenLanguage: String = "es"
     @AppStorage(VoiceSettings.coucouWakeKey) private var coucouWake: Bool = false
     @AppStorage("voiceTTSEngine")      private var ttsEngine: String = "system"
@@ -1491,12 +1491,13 @@ struct SettingsView: View {
                     Text(String(localized: "voice.language"))
                         .frame(width: 130, alignment: .leading)
                     Picker(String(localized: "voice.language"), selection: $voiceLanguage) {
+                        Text(verbatim: "Español").tag("es")
                         Text(verbatim: "Français").tag("fr")
                         Text(verbatim: "English").tag("en")
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 180)
+                    .frame(maxWidth: 260)
                     .onChange(of: voiceLanguage) { _, _ in
                         // Chosen by hand: Coucou no longer offers to switch.
                         VoiceSettings.languageOfferDone = true

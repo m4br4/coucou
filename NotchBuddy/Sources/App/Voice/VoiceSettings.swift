@@ -35,18 +35,22 @@ enum VoiceSettings {
         set { UserDefaults.standard.set(newValue, forKey: captionEnabledKey) }
     }
 
-    /// Language Coucou ANSWERS in: "en" (default) or "fr".
+    /// Language Coucou ANSWERS in: "es" (this fork's default), "en" or "fr".
     static var language: String {
-        get { UserDefaults.standard.string(forKey: "voiceLanguage") ?? "en" }
+        get { UserDefaults.standard.string(forKey: "voiceLanguage") ?? "es" }
         set { UserDefaults.standard.set(newValue, forKey: "voiceLanguage") }
     }
     static var answerLocale: Locale {
         if JarvisTurn.isActive { return JarvisTurn.locale }   // "Jarvis, …" answers in Spanish
-        return Locale(identifier: language == "fr" ? "fr-FR" : "en-US")
+        switch language {
+        case "fr": return Locale(identifier: "fr-FR")
+        case "es": return Locale(identifier: "es-MX")
+        default:   return Locale(identifier: "en-US")
+        }
     }
 
-    /// Language Coucou LISTENS to: "es" (this fork's default), "auto" (the Mac's dictation
-    /// language), "en" or "fr". Independent from the answer language: speak French, hear English.
+    /// Language Coucou LISTENS to: "es" (this fork's default), "auto" (Spanish, then the Mac's
+    /// dictation languages), "en" or "fr". Independent from the answer language: speak French, hear English.
     static var listenLanguage: String {
         get { UserDefaults.standard.string(forKey: "voiceListenLanguage") ?? "es" }
         set { UserDefaults.standard.set(newValue, forKey: "voiceListenLanguage") }

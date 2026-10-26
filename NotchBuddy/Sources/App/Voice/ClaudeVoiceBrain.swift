@@ -127,15 +127,14 @@ final class ClaudeVoiceBrain {
     // MARK: Prompt
 
     private static func systemPrompt() -> String {
-        let fr = VoiceSettings.language == "fr"
         let today = Date().formatted(.dateTime.weekday(.wide).day().month(.wide).year().hour().minute()
-            .locale(Locale(identifier: fr ? "fr_FR" : "en_US")))
+            .locale(VoiceSettings.answerLocale))
         let state = AppState.shared
         let active = ([state.mainPillId] + Array(state.activeIntegrations))
             .compactMap { PillCatalog.definition(for: $0)?.name }
         let available = PillCatalog.available.map(\.name).joined(separator: ", ")
         if JarvisTurn.isActive { return JarvisVoice.systemPrompt(active: active, available: available) }
-        let language = fr ? "French" : "English"
+        let language = ["fr": "French", "es": "Spanish"][VoiceSettings.language] ?? "English"
         return """
         You are \(Brand.name), a voice assistant living in the notch of the user's Mac: \
         quick, warm, a little playful. It is \(today).

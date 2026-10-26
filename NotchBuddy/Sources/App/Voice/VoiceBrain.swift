@@ -122,7 +122,7 @@ final class VoiceBrain {
             """
         }
         return """
-        You are \(Brand.name), an assistant living in the MacBook notch. The user may speak French or English: always answer in English.
+        You are \(Brand.name), an assistant living in the MacBook notch. The user may speak French or English: always answer in \(VoiceSettings.language == "es" ? "Spanish" : "English").
         Answer in one or two short sentences. Be direct.
         Only ask a question when you truly need a detail to act: one short question ending with "?". Otherwise never end with a question.
         Use the tools for pills and music.
@@ -454,7 +454,7 @@ struct ServiceTool: Tool, @unchecked Sendable {
         guard let topic = VoiceTopic(rawValue: arguments.topic) else {
             return "unknown topic: \(arguments.topic)"
         }
-        return await LiveVoiceInfo.shared.answer(topic, locale: Locale(identifier: VoiceSettings.language == "fr" ? "fr-FR" : "en-US"))
+        return await LiveVoiceInfo.shared.answer(topic, locale: VoiceSettings.answerLocale)
     }
 }
 
