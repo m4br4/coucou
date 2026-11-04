@@ -73,6 +73,21 @@ enum VoiceAudioTests {
             check("\(name): the sound survives", (samples.map { abs($0) }.max() ?? 0) > 0.1)
         }
 
+        // MARK: 1b. 48 kHz stereo, the eMeet C960's format, with sound in one channel only
+        do {
+            let audio = VoiceAudio()
+            let stereo = buffer(rate: 48_000, channels: 2, frames: 4800, amplitude: 0.5)
+            memset(stereo.floatChannelData![1], 0, 4800 * MemoryLayout<Float>.size)
+            var buffers: [AVAudioPCMBuffer] = []
+            audio.onBuffer = { buf, _ in buffers.append(buf) }
+            audio.prepareConverter(for: stereo.format)
+            let time = AVAudioTime(hostTime: 0)
+            for _ in 0..<40 { audio.processTap(buffer(rate: 48_000, channels: 2, frames: 4800, amplitude: 0.0005), time: time) }
+            for _ in 0..<40 { audio.processTap(stereo, time: time) }
+            let samples = buffers.last.map { UnsafeBufferPointer(start: $0.floatChannelData![0], count: Int($0.frameLength)) }
+            check("stereo with one live channel reaches the recognizer", (samples?.map { abs($0) }.max() ?? 0) > 0.1)
+        }
+
         // MARK: 2. Tap: reports the input once, with the first buffer
         do {
             logLock.withLock { logged.removeAll() }
@@ -89,7 +104,8 @@ enum VoiceAudioTests {
             check("reported sample rate is the mic's", inputs.first?.sampleRate == 48_000)
             let lines = logLock.withLock { logged }.filter { $0.hasPrefix("[Voice] escuchando con ") }
             check("logged once", lines.count == 1)
-            check("log has device and rate", lines.first == "[Voice] escuchando con unknown device, 48000 Hz")
+            check("reported channels are the mic's", inputs.first?.channels == 2)
+            check("log has device and format", lines.first == "[Voice] escuchando con unknown device, 48000 Hz 2ch")
         }
 
         // MARK: 3. Dictation off is told apart from every other recognizer error
@@ -108,7 +124,7 @@ enum VoiceAudioTests {
 
         // MARK: 4. Status line
         do {
-            let mic = VoiceInput(device: "MacBook Pro Microphone", sampleRate: 48_000)
+            let mic = VoiceInput(device: "HD Webcam eMeet C960", sampleRate: 48_000, channels: 2)
             func status(enabled: Bool = true, paused: Bool = false, unavailable: Bool = false,
                         dictationOff: Bool = false, error: String? = nil,
                         input: VoiceInput? = mic, locale: String? = "es-MX") -> VoiceListenStatus {
@@ -116,7 +132,7 @@ enum VoiceAudioTests {
                          dictationDisabled: dictationOff, audioError: error, input: input, locale: locale)
             }
             check("listening", status() == .listening(mic, locale: "es-MX"))
-            check("listening text", status().text == "Escuchando ✓ MacBook Pro Microphone, 48000 Hz, es-MX")
+            check("listening text", status().text == "Escuchando ✓ HD Webcam eMeet C960, 48000 Hz 2ch, es-MX")
             check("listening is listening", status().isListening)
             check("off wins", status(enabled: false, dictationOff: true) == .off)
             check("paused", status(paused: true).text == "✗ En pausa")

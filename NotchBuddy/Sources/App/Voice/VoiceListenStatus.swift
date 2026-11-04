@@ -9,8 +9,9 @@ import Foundation
 struct VoiceInput: Equatable, Sendable {
     let device: String
     let sampleRate: Double
+    let channels: Int
 
-    var description: String { "\(device), \(Int(sampleRate)) Hz" }
+    var description: String { "\(device), \(Int(sampleRate)) Hz \(channels)ch" }
 }
 
 enum VoiceListenStatus: Equatable {

@@ -172,7 +172,8 @@ final class VoiceAudio: @unchecked Sendable {
 
         if !reportedListening {
             reportedListening = true
-            let input = VoiceInput(device: inputName, sampleRate: buf.format.sampleRate)
+            let input = VoiceInput(device: inputName, sampleRate: buf.format.sampleRate,
+                                   channels: Int(buf.format.channelCount))
             appendAppLog("nb.log", "[Voice] escuchando con \(input.description)")
             DispatchQueue.main.async { [weak self] in self?.onListening?(input) }
         }
