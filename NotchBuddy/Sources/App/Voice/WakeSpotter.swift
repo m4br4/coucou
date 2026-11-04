@@ -32,11 +32,13 @@ final class WakeSpotter: @unchecked Sendable {
     var onCommandUpdate:  ((String) -> Void)?
     var onCommandEnd:     (() -> Void)?
     /// Fired when the session ends in wake phase (no command captured).
-    /// `wasError` is true for real errors; false for clean finals, no-speech
+    /// The argument is "domain/code" for real errors; nil for clean finals, no-speech
     /// timeout (1110) and cancellations — those do not count as backoff failures.
-    var onWakeWindowEnded: ((Bool) -> Void)?
+    var onWakeWindowEnded: ((String?) -> Void)?
     /// Fired instead of the two above when macOS refuses recognition: Dictation is off.
     var onRecognizerDisabled: (() -> Void)?
+    /// Fired on the first text of a window: the recognizer works.
+    var onRecognizerHeard: (() -> Void)?
 
     /// Extra strings to add to the recognizer's contextual hints (e.g. pill names).
     /// Set before calling `beginWindow`. Thread-safe (read under `lock`).
@@ -166,7 +168,7 @@ final class WakeSpotter: @unchecked Sendable {
         case woke(String)
         case commandUpdate(String)
         case commandEnd
-        case wakeWindowEnded(wasError: Bool)
+        case wakeWindowEnded(failure: String?)
         case recognizerDisabled(wasCommand: Bool)
     }
 
@@ -174,6 +176,7 @@ final class WakeSpotter: @unchecked Sendable {
                                error: Error?,
                                expectedGen: Int) {
         var logMsg: String? = nil
+        var heard = false
 
         let action: RecogAction? = lock.withLock { () -> RecogAction? in
             guard active else { return nil }
@@ -186,6 +189,7 @@ final class WakeSpotter: @unchecked Sendable {
 
             if let transcript = result?.bestTranscription.formattedString {
                 partialCount += 1
+                heard = partialCount == 1
                 switch phase {
                 case .wake:
                     let words = WakePhrase.normalise(transcript).split(separator: " ")
@@ -208,7 +212,7 @@ final class WakeSpotter: @unchecked Sendable {
                 let wasCommand = phase == .command
                 let n          = partialCount
                 // 1110 (no speech) and cancellations are normal ends, not backoff failures.
-                let wasError   = error.map { !spotterIsExpectedError($0) } ?? false
+                let failure    = spotterFailure(error)
                 request      = nil
                 task         = nil
                 recognizer   = nil
@@ -221,14 +225,17 @@ final class WakeSpotter: @unchecked Sendable {
                     logMsg = "[Voice] spotter task end: final, partials \(n)"
                 }
                 if let error, spotterRecognizerIsDisabled(error) {
+                    // Made while Dictation was off, it might never recover: the next window gets a new one.
+                    cachedRecognizer = nil
                     return .recognizerDisabled(wasCommand: wasCommand)
                 }
-                return wasCommand ? .commandEnd : .wakeWindowEnded(wasError: wasError)
+                return wasCommand ? .commandEnd : .wakeWindowEnded(failure: failure)
             }
             return nil
         }
 
         if let msg = logMsg { appendAppLog("nb.log", msg) }
+        if heard { DispatchQueue.main.async { [weak self] in self?.onRecognizerHeard?() } }
         guard let action else { return }
 
         switch action {
@@ -238,8 +245,8 @@ final class WakeSpotter: @unchecked Sendable {
             DispatchQueue.main.async { [weak self] in self?.onCommandUpdate?(s) }
         case .commandEnd:
             DispatchQueue.main.async { [weak self] in self?.onCommandEnd?() }
-        case .wakeWindowEnded(let wasError):
-            DispatchQueue.main.async { [weak self] in self?.onWakeWindowEnded?(wasError) }
+        case .wakeWindowEnded(let failure):
+            DispatchQueue.main.async { [weak self] in self?.onWakeWindowEnded?(failure) }
         case .recognizerDisabled(let wasCommand):
             DispatchQueue.main.async { [weak self] in
                 self?.onRecognizerDisabled?()

@@ -42,6 +42,13 @@ func spotterIsExpectedError(_ error: Error) -> Bool {
     return false
 }
 
+/// "domain/code" of a real failure, nil when the session ended normally.
+func spotterFailure(_ error: Error?) -> String? {
+    guard let error, !spotterIsExpectedError(error) else { return nil }
+    let e = error as NSError
+    return "\(e.domain)/\(e.code)"
+}
+
 // MARK: - Recognizer turned off in macOS
 //
 // kLSRErrorDomain/201 — "Siri and Dictation are disabled". Every window fails at once, with

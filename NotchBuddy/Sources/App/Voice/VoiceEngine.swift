@@ -13,7 +13,7 @@ import Speech
 // - Continuous stall watchdog: if no audio buffer arrives for 2 s while the
 //   pipeline is active, triggers a pipeline rebuild (regardless of VAD state).
 // - Rate-limited rebuilds: ≥5 s between rebuilds, ≤5 per minute. If the limit
-//   is exceeded, audioError is set (shown in Settings → Voice).
+//   is exceeded, recognitionStalled is set (shown in Settings → Voice).
 // - AVAudioEngineConfigurationChange (headphone events) triggers rebuild, but
 //   config changes within 1 s of our own engine.start() are ignored (the OS
 //   fires one spuriously on start).
@@ -33,7 +33,8 @@ final class VoiceEngine: ObservableObject {
     @Published private(set) var commandTranscript: String = ""
     @Published private(set) var recognizerUnavailable: Bool = false
     @Published private(set) var audioError: String? = nil
-    @Published private(set) var dictationDisabled: Bool = false
+    @Published private(set) var recognitionStalled: Bool = false
+    @Published private(set) var recognizerHealth = RecognizerHealth()
     @Published private(set) var listeningInput: VoiceInput? = nil
     /// Read by Mochi's canvas every frame; not published, so ~20 updates/s while I talk
     /// don't re-render Settings or the island views.
@@ -50,7 +51,8 @@ final class VoiceEngine: ObservableObject {
 
     var listenStatus: VoiceListenStatus {
         .resolve(enabled: isEnabled, paused: isPaused, recognizerUnavailable: recognizerUnavailable,
-                 dictationDisabled: dictationDisabled, audioError: audioError,
+                 recognizer: recognizerHealth, audioStartFailed: audioError != nil,
+                 recognitionStalled: recognitionStalled,
                  input: listeningInput, locale: locale?.identifier)
     }
 
@@ -222,6 +224,7 @@ final class VoiceEngine: ObservableObject {
         }
         recognizerUnavailable = false
         audioError = nil
+        recognitionStalled = false
         locale = loc
         dictationRetryAt = .distantPast
 
@@ -232,7 +235,6 @@ final class VoiceEngine: ObservableObject {
         // ── Spotter callbacks ─────────────────────────────────────────────────
 
         s.onWake = { [weak self] transcript in
-            self?.recognizerResponded()
             self?.wakeDetected(transcript: transcript)
         }
 
@@ -246,18 +248,21 @@ final class VoiceEngine: ObservableObject {
 
         s.onRecognizerDisabled = { [weak self] in
             guard let self else { return }
-            if !dictationDisabled {
+            if !recognizerHealth.dictationDisabled {
                 appendAppLog("nb.log",
                     "[Voice] Siri and Dictation are off in macOS: System Settings → Keyboard → Dictation")
             }
-            dictationDisabled = true
+            recognizerHealth.dictationTurnedOff()
             dictationRetryAt  = Date().addingTimeInterval(Self.dictationRetryInterval)
             wakeWindowWork?.cancel(); wakeWindowWork = nil
         }
 
-        s.onWakeWindowEnded = { [weak self] wasError in
-            self?.recognizerResponded()
+        s.onRecognizerHeard = { [weak self] in self?.recognizerHealth.heard() }
+
+        s.onWakeWindowEnded = { [weak self] failure in
+            self?.recognizerHealth.windowEnded(failure: failure)
             guard let self, !isListeningForCommand, voiceSegmentActive else { return }
+            let wasError = failure != nil
 
             if wasError {
                 consecErrorStreak += 1
@@ -312,7 +317,7 @@ final class VoiceEngine: ObservableObject {
                 self.openWindowWhenSpeakerQuiet(audio: a, spotter: s, locale: loc)
                 return
             }
-            guard !dictationDisabled || Date() >= dictationRetryAt else { return }
+            guard !recognizerHealth.dictationDisabled || Date() >= dictationRetryAt else { return }
             appendAppLog("nb.log", "[Voice] vad start")
             voiceSegmentActive = true
             backoff.reset()
@@ -369,6 +374,7 @@ final class VoiceEngine: ObservableObject {
         spotter?.onCommandEnd      = nil
         spotter?.onWakeWindowEnded = nil
         spotter?.onRecognizerDisabled = nil
+        spotter?.onRecognizerHeard    = nil
         deferredStartWork?.cancel(); deferredStartWork = nil
         audio?.stop()
         audio              = nil
@@ -494,20 +500,15 @@ final class VoiceEngine: ObservableObject {
 
     private var dictationRetryAt = Date.distantPast
 
-    /// Any answer but 201 means Dictation is on again.
-    private func recognizerResponded() {
-        if dictationDisabled { dictationDisabled = false }
-    }
-
     private static func describe(_ st: WakeSpotter.WindowStats) -> String {
         "partials=\(st.partials) words=\(st.maxWords) coucou-like=\(st.nearWake ? "yes" : "no")"
     }
 
     private func checkDeafRecognizer(_ st: WakeSpotter.WindowStats, elapsed: TimeInterval) {
-        if st.partials > 0 { deafWindows = 0; recognizerResponded(); return }
+        if st.partials > 0 { deafWindows = 0; return }
         // A short noise (cough, click) legitimately gives no text: only count windows
         // where speech went on for a while.
-        guard elapsed >= 3, !dictationDisabled else { return }
+        guard elapsed >= 3, !recognizerHealth.dictationDisabled else { return }
         // Music without words gives no text either: while music plays it takes 6 silent
         // windows, not 2, before a rebuild (each costs a restart and ~0.5 s of deafness).
         let music = AppState.shared.musicPlaying || SpotifyController.shared.isPlaying
@@ -535,9 +536,7 @@ final class VoiceEngine: ObservableObject {
         let tooMany  = rebuildsThisMinute >= Self.maxRebuildsPerMinute
         if tooSoon || tooMany {
             appendAppLog("nb.log", "[Voice] rebuild limit reached (\(reason))")
-            if audioError == nil {
-                audioError = "Voice recognition stalled — toggle Voice off/on to reset."
-            }
+            recognitionStalled = true
             return
         }
 

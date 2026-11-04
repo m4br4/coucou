@@ -126,10 +126,14 @@ enum VoiceAudioTests {
         do {
             let mic = VoiceInput(device: "HD Webcam eMeet C960", sampleRate: 48_000, channels: 2)
             func status(enabled: Bool = true, paused: Bool = false, unavailable: Bool = false,
-                        dictationOff: Bool = false, error: String? = nil,
+                        dictationOff: Bool = false, startFailed: Bool = false, stalled: Bool = false,
+                        recognizer: RecognizerHealth? = nil,
                         input: VoiceInput? = mic, locale: String? = "es-MX") -> VoiceListenStatus {
-                .resolve(enabled: enabled, paused: paused, recognizerUnavailable: unavailable,
-                         dictationDisabled: dictationOff, audioError: error, input: input, locale: locale)
+                var health = recognizer ?? RecognizerHealth()
+                if dictationOff { health.dictationTurnedOff() }
+                return .resolve(enabled: enabled, paused: paused, recognizerUnavailable: unavailable,
+                                recognizer: health, audioStartFailed: startFailed,
+                                recognitionStalled: stalled, input: input, locale: locale)
             }
             check("listening", status() == .listening(mic, locale: "es-MX"))
             check("listening text", status().text == "Escuchando ✓ HD Webcam eMeet C960, 48000 Hz 2ch, es-MX")
@@ -140,9 +144,44 @@ enum VoiceAudioTests {
             check("Dictation off says where to fix it",
                   status(dictationOff: true).text == "✗ Dictado apagado: actívalo en Ajustes del Sistema → Teclado → Dictado")
             check("Dictation off with a working mic is not listening", !status(dictationOff: true).isListening)
-            check("mic error", status(error: "x").text == "✗ Micrófono no disponible")
-            check("Dictation off wins over a mic error", status(dictationOff: true, error: "x").text.contains("Dictado"))
+            check("audio start failure", status(startFailed: true).text == "✗ Micrófono no disponible")
+            check("Dictation off wins over a mic error", status(dictationOff: true, startFailed: true).text.contains("Dictado"))
+            check("stalled is not a microphone problem",
+                  status(stalled: true).text == "✗ Reconocimiento atascado: apaga y enciende la voz")
+            check("audio start failure wins over stalled", status(startFailed: true, stalled: true).text == "✗ Micrófono no disponible")
+
+            var failed = RecognizerHealth()
+            failed.windowEnded(failure: "kLSRErrorDomain/102")
+            check("recognizer error shows its code", status(recognizer: failed).text == "✗ Reconocedor: kLSRErrorDomain/102")
+            check("recognizer error is not listening", !status(recognizer: failed).isListening)
+            check("stalled wins over a recognizer error", status(stalled: true, recognizer: failed).text.contains("atascado"))
             check("no audio yet", status(input: nil).text == "✗ Sin audio del micrófono")
+        }
+
+        // MARK: 5. Recognizer health: the newest answer wins
+        do {
+            var health = RecognizerHealth()
+            health.dictationTurnedOff()
+            health.windowEnded(failure: "kLSRErrorDomain/102")
+            check("another error replaces the Dictation notice", !health.dictationDisabled && health.failure == "kLSRErrorDomain/102")
+            health.windowEnded(failure: nil)
+            check("a normal end keeps the error", health.failure == "kLSRErrorDomain/102")
+            health.dictationTurnedOff()
+            check("201 replaces the error", health.dictationDisabled && health.failure == nil)
+            health.windowEnded(failure: nil)
+            check("a normal end clears Dictation off", !health.dictationDisabled)
+            health.windowEnded(failure: "x/1")
+            health.heard()
+            check("text clears the error", health.failure == nil)
+            health.dictationTurnedOff()
+            health.heard()
+            check("text clears Dictation off", !health.dictationDisabled)
+
+            check("failure text is domain/code",
+                  spotterFailure(NSError(domain: "kLSRErrorDomain", code: 102)) == "kLSRErrorDomain/102")
+            check("no error is no failure", spotterFailure(nil) == nil)
+            check("no speech is no failure", spotterFailure(NSError(domain: "kAFAssistantErrorDomain", code: 1110)) == nil)
+            check("cancelling is no failure", spotterFailure(NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError)) == nil)
         }
 
         print("\(total - failures)/\(total) tests passed.")
