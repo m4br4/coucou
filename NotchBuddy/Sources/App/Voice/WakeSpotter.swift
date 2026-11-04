@@ -35,6 +35,8 @@ final class WakeSpotter: @unchecked Sendable {
     /// `wasError` is true for real errors; false for clean finals, no-speech
     /// timeout (1110) and cancellations — those do not count as backoff failures.
     var onWakeWindowEnded: ((Bool) -> Void)?
+    /// Fired instead of the two above when macOS refuses recognition: Dictation is off.
+    var onRecognizerDisabled: (() -> Void)?
 
     /// Extra strings to add to the recognizer's contextual hints (e.g. pill names).
     /// Set before calling `beginWindow`. Thread-safe (read under `lock`).
@@ -165,6 +167,7 @@ final class WakeSpotter: @unchecked Sendable {
         case commandUpdate(String)
         case commandEnd
         case wakeWindowEnded(wasError: Bool)
+        case recognizerDisabled(wasCommand: Bool)
     }
 
     private func handleResult(_ result: SFSpeechRecognitionResult?,
@@ -217,6 +220,9 @@ final class WakeSpotter: @unchecked Sendable {
                 } else {
                     logMsg = "[Voice] spotter task end: final, partials \(n)"
                 }
+                if let error, spotterRecognizerIsDisabled(error) {
+                    return .recognizerDisabled(wasCommand: wasCommand)
+                }
                 return wasCommand ? .commandEnd : .wakeWindowEnded(wasError: wasError)
             }
             return nil
@@ -234,6 +240,11 @@ final class WakeSpotter: @unchecked Sendable {
             DispatchQueue.main.async { [weak self] in self?.onCommandEnd?() }
         case .wakeWindowEnded(let wasError):
             DispatchQueue.main.async { [weak self] in self?.onWakeWindowEnded?(wasError) }
+        case .recognizerDisabled(let wasCommand):
+            DispatchQueue.main.async { [weak self] in
+                self?.onRecognizerDisabled?()
+                if wasCommand { self?.onCommandEnd?() }
+            }
         }
     }
 }

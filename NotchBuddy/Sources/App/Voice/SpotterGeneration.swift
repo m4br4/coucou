@@ -41,3 +41,13 @@ func spotterIsExpectedError(_ error: Error) -> Bool {
     if e.code == NSUserCancelledError { return true }
     return false
 }
+
+// MARK: - Recognizer turned off in macOS
+//
+// kLSRErrorDomain/201 — "Siri and Dictation are disabled". Every window fails at once, with
+// the microphone working: rebuilding the audio pipeline cannot help, only the user can.
+
+func spotterRecognizerIsDisabled(_ error: Error) -> Bool {
+    let e = error as NSError
+    return e.domain == "kLSRErrorDomain" && e.code == 201
+}

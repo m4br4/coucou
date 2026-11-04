@@ -1,6 +1,7 @@
 #if !APPSTORE
 import AVFoundation
 import Accelerate
+import CoreAudio
 
 // MARK: - VoiceAudio
 //
@@ -28,6 +29,10 @@ final class VoiceAudio: @unchecked Sendable {
 
     // Mono 16 kHz Float32 converter — created once per input format, audio tap thread.
     private var converter: AVAudioConverter?
+
+    /// Default input device, read on start. Reported once the first buffer proves it works.
+    private var inputName = "unknown device"
+    private var reportedListening = false   // audio tap thread
 
     // VAD — read/written only on the audio tap thread.
     private var vad = EnergyVAD()
@@ -69,6 +74,8 @@ final class VoiceAudio: @unchecked Sendable {
     /// Fired on the main thread when AVAudioEngine reports a configuration change
     /// (headphone connect/disconnect, sample-rate change, etc.).
     var onConfigChange: (() -> Void)?
+    /// Fired on the main thread with the first buffer: audio really arrives.
+    var onListening:    ((VoiceInput) -> Void)?
 
     // MARK: - Control
 
@@ -78,19 +85,8 @@ final class VoiceAudio: @unchecked Sendable {
         let input = engine.inputNode
         let fmt   = input.outputFormat(forBus: 0)
 
-        // Build a stateful mono 16 kHz Float32 converter for the recognizer.
-        let target = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                   sampleRate: 16_000, channels: 1, interleaved: false)!
-        if let conv = AVAudioConverter(from: fmt, to: target) {
-            conv.primeMethod = .none
-            conv.downmix      = true   // collapse multi-channel mic (e.g. 3ch) to mono
-            converter = conv
-            appendAppLog("nb.log",
-                "[Voice] audio format: input \(Int(fmt.sampleRate)) Hz \(fmt.channelCount)ch → 16000 Hz 1ch")
-        } else {
-            appendAppLog("nb.log",
-                "[Voice] audio converter unavailable: \(Int(fmt.sampleRate)) Hz \(fmt.channelCount)ch — feeding raw")
-        }
+        prepareConverter(for: fmt)
+        inputName = Self.defaultInputName()
 
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buf, time in
             self?.processTap(buf, time: time)
@@ -109,6 +105,38 @@ final class VoiceAudio: @unchecked Sendable {
         appendAppLog("nb.log", "[Voice] engine started (\(Int(fmt.sampleRate)) Hz \(fmt.channelCount)ch)")
     }
 
+    /// Build a stateful mono 16 kHz Float32 converter for the recognizer.
+    func prepareConverter(for fmt: AVAudioFormat) {
+        let target = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                   sampleRate: 16_000, channels: 1, interleaved: false)!
+        if let conv = AVAudioConverter(from: fmt, to: target) {
+            conv.primeMethod = .none
+            conv.downmix      = true   // collapse multi-channel mic (e.g. 3ch) to mono
+            converter = conv
+            appendAppLog("nb.log",
+                "[Voice] audio format: input \(Int(fmt.sampleRate)) Hz \(fmt.channelCount)ch → 16000 Hz 1ch")
+        } else {
+            appendAppLog("nb.log",
+                "[Voice] audio converter unavailable: \(Int(fmt.sampleRate)) Hz \(fmt.channelCount)ch — feeding raw")
+        }
+    }
+
+    private static func defaultInputName() -> String {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var device = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
+                                         &size, &device) == noErr else { return "unknown device" }
+        address.mSelector = kAudioObjectPropertyName
+        var name: Unmanaged<CFString>?
+        size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &name) == noErr,
+              let name else { return "unknown device" }
+        return name.takeRetainedValue() as String
+    }
+
     func stop() {
         guard tapInstalled else { return }
         if let obs = configObserver {
@@ -118,6 +146,7 @@ final class VoiceAudio: @unchecked Sendable {
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         tapInstalled   = false
+        reportedListening = false
         converter      = nil
         prerollLock.withLock { prerollBuffers.removeAll() }
         if vad.isActive {
@@ -138,8 +167,15 @@ final class VoiceAudio: @unchecked Sendable {
 
     // MARK: - Tap processing (audio thread)
 
-    private func processTap(_ buf: AVAudioPCMBuffer, time: AVAudioTime) {
+    func processTap(_ buf: AVAudioPCMBuffer, time: AVAudioTime) {
         lastBufferTime = Date()
+
+        if !reportedListening {
+            reportedListening = true
+            let input = VoiceInput(device: inputName, sampleRate: buf.format.sampleRate)
+            appendAppLog("nb.log", "[Voice] escuchando con \(input.description)")
+            DispatchQueue.main.async { [weak self] in self?.onListening?(input) }
+        }
 
         // Tune durations to the real buffer length (often 100 ms on macOS, not 1024 frames).
         // Retuned only when the length moves by more than 5 % (some devices jitter a frame).

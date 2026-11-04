@@ -1420,6 +1420,13 @@ struct SettingsView: View {
                     .disabled(!voicePermissionsGranted && !voiceEngine.isEnabled)
                 Toggle(isOn: $coucouWake) { Text(verbatim: "Responder también a Coucou («OK Coucou»)") }
 
+                if voiceEngine.listenStatus != .off {
+                    Text(verbatim: voiceEngine.listenStatus.text)
+                        .font(.system(size: 11))
+                        .foregroundColor(voiceEngine.listenStatus.isListening ? .green : .orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: webKeySaved ? "checkmark.circle.fill" : "exclamationmark.circle")
                         .foregroundColor(webKeySaved ? .green : .orange)

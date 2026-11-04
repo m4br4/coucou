@@ -17,6 +17,8 @@ import Speech
 // - AVAudioEngineConfigurationChange (headphone events) triggers rebuild, but
 //   config changes within 1 s of our own engine.start() are ignored (the OS
 //   fires one spuriously on start).
+// - Dictation off in macOS (kLSRErrorDomain/201): no rebuilds, it cannot help. Settings
+//   says so, and the next voice at most every 30 s tries again, to notice it turned on.
 // - endCommand() is idempotent: if not in command mode, only cancels timers.
 @MainActor
 final class VoiceEngine: ObservableObject {
@@ -31,6 +33,8 @@ final class VoiceEngine: ObservableObject {
     @Published private(set) var commandTranscript: String = ""
     @Published private(set) var recognizerUnavailable: Bool = false
     @Published private(set) var audioError: String? = nil
+    @Published private(set) var dictationDisabled: Bool = false
+    @Published private(set) var listeningInput: VoiceInput? = nil
     /// Read by Mochi's canvas every frame; not published, so ~20 updates/s while I talk
     /// don't re-render Settings or the island views.
     private(set) var micLevel: Double = 0
@@ -43,6 +47,12 @@ final class VoiceEngine: ObservableObject {
     private var dictationActive = 0
 
     var isPaused: Bool { screenLocked || screenSleeping || lowPowerMode || dictationActive > 0 }
+
+    var listenStatus: VoiceListenStatus {
+        .resolve(enabled: isEnabled, paused: isPaused, recognizerUnavailable: recognizerUnavailable,
+                 dictationDisabled: dictationDisabled, audioError: audioError,
+                 input: listeningInput, locale: locale?.identifier)
+    }
 
     // MARK: - Audio pipeline (main-thread owned)
 
@@ -102,6 +112,7 @@ final class VoiceEngine: ObservableObject {
     private static let unavailableRebuildDelay:  TimeInterval = 10.0
     private static let minRebuildInterval:       TimeInterval = 5.0
     private static let maxRebuildsPerMinute                   = 5
+    private static let dictationRetryInterval:   TimeInterval = 30.0
 
     private static let cancelPhrases = ["annule", "annuler", "cancel", "laisse tomber", "never mind"]
 
@@ -212,6 +223,7 @@ final class VoiceEngine: ObservableObject {
         recognizerUnavailable = false
         audioError = nil
         locale = loc
+        dictationRetryAt = .distantPast
 
         let a = VoiceAudio()
         let s = WakeSpotter()
@@ -220,6 +232,7 @@ final class VoiceEngine: ObservableObject {
         // ── Spotter callbacks ─────────────────────────────────────────────────
 
         s.onWake = { [weak self] transcript in
+            self?.recognizerResponded()
             self?.wakeDetected(transcript: transcript)
         }
 
@@ -231,7 +244,19 @@ final class VoiceEngine: ObservableObject {
             self?.endCommand(postFinished: true)
         }
 
+        s.onRecognizerDisabled = { [weak self] in
+            guard let self else { return }
+            if !dictationDisabled {
+                appendAppLog("nb.log",
+                    "[Voice] Siri and Dictation are off in macOS: System Settings → Keyboard → Dictation")
+            }
+            dictationDisabled = true
+            dictationRetryAt  = Date().addingTimeInterval(Self.dictationRetryInterval)
+            wakeWindowWork?.cancel(); wakeWindowWork = nil
+        }
+
         s.onWakeWindowEnded = { [weak self] wasError in
+            self?.recognizerResponded()
             guard let self, !isListeningForCommand, voiceSegmentActive else { return }
 
             if wasError {
@@ -267,6 +292,8 @@ final class VoiceEngine: ObservableObject {
 
         a.onMicLevel = { [weak self] level in self?.micLevel = level }
 
+        a.onListening = { [weak self] input in self?.listeningInput = input }
+
         // Ignore config changes within 1 s of our own engine.start() — the OS
         // fires one spuriously immediately after AVAudioEngine.start().
         a.onConfigChange = { [weak self] in
@@ -285,6 +312,7 @@ final class VoiceEngine: ObservableObject {
                 self.openWindowWhenSpeakerQuiet(audio: a, spotter: s, locale: loc)
                 return
             }
+            guard !dictationDisabled || Date() >= dictationRetryAt else { return }
             appendAppLog("nb.log", "[Voice] vad start")
             voiceSegmentActive = true
             backoff.reset()
@@ -335,15 +363,18 @@ final class VoiceEngine: ObservableObject {
         audio?.onBuffer        = nil
         audio?.onMicLevel      = nil
         audio?.onConfigChange  = nil
+        audio?.onListening     = nil
         spotter?.onWake            = nil
         spotter?.onCommandUpdate   = nil
         spotter?.onCommandEnd      = nil
         spotter?.onWakeWindowEnded = nil
+        spotter?.onRecognizerDisabled = nil
         deferredStartWork?.cancel(); deferredStartWork = nil
         audio?.stop()
         audio              = nil
         spotter            = nil
         locale             = nil
+        listeningInput     = nil
         voiceSegmentActive = false
         backoff.reset()
         consecErrorStreak  = 0
@@ -461,15 +492,22 @@ final class VoiceEngine: ObservableObject {
     /// window: it is stuck. Rebuild the pipeline instead of staying deaf until relaunch.
     private var deafWindows = 0
 
+    private var dictationRetryAt = Date.distantPast
+
+    /// Any answer but 201 means Dictation is on again.
+    private func recognizerResponded() {
+        if dictationDisabled { dictationDisabled = false }
+    }
+
     private static func describe(_ st: WakeSpotter.WindowStats) -> String {
         "partials=\(st.partials) words=\(st.maxWords) coucou-like=\(st.nearWake ? "yes" : "no")"
     }
 
     private func checkDeafRecognizer(_ st: WakeSpotter.WindowStats, elapsed: TimeInterval) {
-        if st.partials > 0 { deafWindows = 0; return }
+        if st.partials > 0 { deafWindows = 0; recognizerResponded(); return }
         // A short noise (cough, click) legitimately gives no text: only count windows
         // where speech went on for a while.
-        guard elapsed >= 3 else { return }
+        guard elapsed >= 3, !dictationDisabled else { return }
         // Music without words gives no text either: while music plays it takes 6 silent
         // windows, not 2, before a rebuild (each costs a restart and ~0.5 s of deafness).
         let music = AppState.shared.musicPlaying || SpotifyController.shared.isPlaying
