@@ -43,12 +43,6 @@ STUB
 cat > "$T/stubs/security" <<'STUB'
 #!/bin/bash
 [ "$1" != "find-identity" ] || cat "$STUBS_STATE/identities" 2>/dev/null || true
-[ "$1" != "find-certificate" ] || echo "$3"
-STUB
-cat > "$T/stubs/openssl" <<'STUB'
-#!/bin/bash
-read -r name
-case "$name" in *Author*) echo "subject=CN=$name, OU=256AUJ9555" ;; *) echo "subject=CN=$name, OU=ABRAHAM123" ;; esac
 STUB
 cat > "$T/stubs/osascript" <<'STUB'
 #!/bin/bash
@@ -75,11 +69,12 @@ mkdir -p "$STUBS_STATE"
 git init -q --bare "$T/origin.git"
 git init -q -b main "$T/repo"
 git_id=(-c user.name=Test -c user.email=test@example.invalid)
-mkdir -p "$T/repo/scripts" "$T/repo/NotchBuddy/Resources"
+PBXPROJ="$T/repo/NotchBuddy/NotchBuddy.xcodeproj/project.pbxproj"
+mkdir -p "$T/repo/scripts" "$T/repo/NotchBuddy/Resources" "$T/repo/NotchBuddy/NotchBuddy.xcodeproj"
 /usr/libexec/PlistBuddy -c "Add :CFBundleName string Jarvis" "$T/repo/NotchBuddy/Resources/Info.plist" >/dev/null
 cp "$ROOT/scripts/instalar-jarvis-app.sh" "$T/repo/scripts/"
 echo one > "$T/repo/marker.txt"
-echo tracked > "$T/repo/NotchBuddy/project.pbxproj"
+echo tracked > "$PBXPROJ"
 git -C "$T/repo" add -A
 git -C "$T/repo" "${git_id[@]}" commit -qm first
 git -C "$T/repo" remote add origin "$T/origin.git"
@@ -138,25 +133,63 @@ check "update works" 'run'
 check "update replaced the app" '[ "$(installed)" = two ]'
 check "update built once more" '[ "$(builds)" = 2 ]'
 
-# Uncommitted work that the pull does not touch: kept and not built.
-echo mine > "$T/repo/NotchBuddy/project.pbxproj"
+# Only project.pbxproj modified: put back, then pulled and installed.
+echo regenerated > "$PBXPROJ"
 push_from_other marker.txt three
-check "dirty checkout still installs" 'run'
-check "dirty checkout is reported" 'out_has "1 uncommitted change(s)"'
-check "dirty file kept" '[ "$(cat "$T/repo/NotchBuddy/project.pbxproj")" = mine ]'
-check "dirty file not built" '[ "$(cat "$T/build/source/NotchBuddy/project.pbxproj")" = tracked ]'
-check "dirty install has the commit" '[ "$(installed)" = three ]'
+check "only pbxproj modified installs" 'run'
+check "pbxproj put back" '[ "$(cat "$PBXPROJ")" = tracked ]'
+check "pbxproj put back is reported" 'out_has "Putting back"'
+check "pbxproj install has the new commit" '[ "$(installed)" = three ]'
+check "checkout clean after putting pbxproj back" '[ -z "$(git -C "$T/repo" status --porcelain)" ]'
 
-# Uncommitted work that the pull would overwrite: stops, keeps everything.
-push_from_other NotchBuddy/project.pbxproj theirs
+# Untracked files do not count and stay.
+mkdir -p "$T/repo/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace/xcshareddata"
+echo mine > "$T/repo/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace/xcshareddata/x"
+push_from_other marker.txt three-b
+check "untracked file does not stop it" 'run'
+check "untracked file stays" '[ "$(cat "$T/repo/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace/xcshareddata/x")" = mine ]'
+check "untracked file is not built" '[ ! -e "$T/build/source/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace/xcshareddata" ]'
+rm -rf "$T/repo/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace"
+
+# Any other modified file, alone or with project.pbxproj: stops, touches nothing.
+push_from_other marker.txt three-c
 HEAD_BEFORE=$(git -C "$T/repo" rev-parse HEAD)
-check "conflicting pull fails" '! run'
+BUILDS_BEFORE=$(builds)
+APP_BEFORE=$(installed)
+echo mine > "$T/repo/marker.txt"
+check "other modified file fails" '! run'
+check "other modified file is named" 'out_has "marker.txt"'
+check "other modified file is explained" 'out_has "Nothing was touched"'
+check "other modified file kept" '[ "$(cat "$T/repo/marker.txt")" = mine ]'
+echo regenerated > "$PBXPROJ"
+check "pbxproj plus another file fails" '! run'
+check "pbxproj kept when another file is modified" '[ "$(cat "$PBXPROJ")" = regenerated ]'
+check "other file kept with pbxproj" '[ "$(cat "$T/repo/marker.txt")" = mine ]'
+check "no pull with modified files" '[ "$(git -C "$T/repo" rev-parse HEAD)" = "$HEAD_BEFORE" ]'
+check "no build with modified files" '[ "$(builds)" = "$BUILDS_BEFORE" ]'
+check "app stays with modified files" '[ "$(installed)" = "$APP_BEFORE" ]'
+git -C "$T/repo" checkout -q -- marker.txt NotchBuddy/NotchBuddy.xcodeproj/project.pbxproj
+check "clean checkout pulls again" 'run'
+
+# No Xcode: a modified project.pbxproj is not put back either.
+echo regenerated > "$PBXPROJ"
+touch "$STUBS_STATE/no-xcode"
+check "no Xcode fails with pbxproj modified" '! run'
+check "no Xcode keeps pbxproj" '[ "$(cat "$PBXPROJ")" = regenerated ]'
+rm "$STUBS_STATE/no-xcode"
+git -C "$T/repo" checkout -q -- NotchBuddy/NotchBuddy.xcodeproj/project.pbxproj
+
+# A pull that cannot fast-forward (an untracked file in its way): stops, keeps everything.
+echo mine > "$T/repo/incoming.txt"
+push_from_other incoming.txt theirs
+HEAD_BEFORE=$(git -C "$T/repo" rev-parse HEAD)
+BUILDS_BEFORE=$(builds)
+check "blocked pull fails" '! run'
 check "failed pull is explained" 'out_has "git pull --ff-only failed"'
-check "dirty file survives a failed pull" '[ "$(cat "$T/repo/NotchBuddy/project.pbxproj")" = mine ]'
+check "file survives a failed pull" '[ "$(cat "$T/repo/incoming.txt")" = mine ]'
 check "head stays after a failed pull" '[ "$(git -C "$T/repo" rev-parse HEAD)" = "$HEAD_BEFORE" ]'
-check "app stays after a failed pull" '[ "$(installed)" = three ]'
-check "nothing built after a failed pull" '[ "$(builds)" = 3 ]'
-git -C "$T/repo" checkout -q -- NotchBuddy/project.pbxproj
+check "nothing built after a failed pull" '[ "$(builds)" = "$BUILDS_BEFORE" ]'
+rm "$T/repo/incoming.txt"
 
 # Diverged history: same.
 echo local > "$T/repo/local.txt"
@@ -217,20 +250,20 @@ kill "$SLEEPER"
 rm "$STUBS_STATE"/pid-*
 SLEEPER=""
 
-# Another Team's certificate is used; the author's is not.
-printf '  1) AAA "Apple Development: Author (X)"\n  2) BBB "IT Crowd Local"\n' > "$STUBS_STATE/identities"
+# "IT Crowd Local" signs when the Mac has it; other certificates do not count.
+printf '  1) AAA "Apple Development: Author (X)"\n' > "$STUBS_STATE/identities"
 push_from_other marker.txt six
 run
-check "author's certificate skipped" '[[ "$(tail -1 "$STUBS_STATE/xcodebuild.args")" == *"CODE_SIGN_IDENTITY=- "* ]]'
-printf '  1) AAA "Apple Development: Author (X)"\n  2) CCC "Apple Development: Abraham (Y)"\n' > "$STUBS_STATE/identities"
+check "ad-hoc without the local identity" '[[ "$(tail -1 "$STUBS_STATE/xcodebuild.args")" == *"CODE_SIGN_IDENTITY=- "* ]]'
+printf '  1) AAA "Apple Development: Author (X)"\n  2) BBB "IT Crowd Local"\n     2 valid identities found\n' > "$STUBS_STATE/identities"
 push_from_other marker.txt seven
 run
 LAST=$(tail -1 "$STUBS_STATE/xcodebuild.args")
-check "local certificate used" '[[ "$LAST" == *"CODE_SIGN_IDENTITY=Apple Development: Abraham (Y) "* ]]'
-check "local Team used" '[[ "$LAST" == *"DEVELOPMENT_TEAM=ABRAHAM123 "* ]]'
+check "local identity used" '[[ "$LAST" == *"CODE_SIGN_IDENTITY=IT Crowd Local "* ]]'
+check "no Team with the local identity" '[[ "$LAST" == *"DEVELOPMENT_TEAM= "* ]]'
 push_from_other marker.txt eight
-JARVIS_SIGN_IDENTITY="IT Crowd Local" run
-check "JARVIS_SIGN_IDENTITY wins" '[[ "$(tail -1 "$STUBS_STATE/xcodebuild.args")" == *"CODE_SIGN_IDENTITY=IT Crowd Local "* ]]'
+JARVIS_SIGN_IDENTITY="Some Other" run
+check "JARVIS_SIGN_IDENTITY wins" '[[ "$(tail -1 "$STUBS_STATE/xcodebuild.args")" == *"CODE_SIGN_IDENTITY=Some Other "* ]]'
 
 # Something else at the target is never replaced.
 rm -rf "$T/apps/Jarvis.app"

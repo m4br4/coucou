@@ -2,25 +2,27 @@
 # Builds this fork (Release) from a clean copy of the latest commit and leaves it in
 # /Applications/Jarvis.app. Running it again with nothing new changes nothing.
 #
-# The checkout is only pulled: xcodegen and the build run in a clone, so uncommitted work
-# (a regenerated project.pbxproj, the string catalog) stays as it is and is not built.
+# xcodegen and the build run in a clone, never in the checkout. Before pulling, a modified
+# project.pbxproj is put back (xcodegen rewrites it anyway); any other modified file stops
+# the script with nothing touched.
 #
-# Signed without the author's Team or profiles: with an Apple Development certificate of
-# another Team when the Mac has one, else ad-hoc. Without a profile there is no iCloud, so
-# the build uses the entitlements without it and leaves the iPhone link (PHONE_LINK) out.
-# macOS sees an ad-hoc app as a new app after each build and asks its permissions again;
-# JARVIS_SIGN_IDENTITY avoids it with any certificate that stays the same.
+# Signed without the author's Team or profiles: with the local certificate "IT Crowd Local",
+# so macOS keeps the app's permissions and Keychain access from one build to the next, or
+# ad-hoc when the Mac does not have it (macOS then sees a new app after each build). Without
+# a profile there is no iCloud, so the build uses the entitlements without it and leaves the
+# iPhone link (PHONE_LINK) out.
 #
 #   ./scripts/instalar-jarvis-app.sh
 #
-#   JARVIS_SIGN_IDENTITY  sign with this identity
+#   JARVIS_SIGN_IDENTITY  sign with this identity instead
 #   JARVIS_APP_DIR        install there instead of /Applications (running apps stay open)
 #   JARVIS_BUILD_DIR      clone and build there instead of ~/Library/Caches/JarvisApp
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLE_ID="fr.louisraille.NotchBuddy"
-AUTHOR_TEAM="256AUJ9555"
+LOCAL_IDENTITY="IT Crowd Local"
+PBXPROJ="NotchBuddy/NotchBuddy.xcodeproj/project.pbxproj"
 APP_DIR="${JARVIS_APP_DIR:-/Applications}"
 QUIT_RUNNING="${JARVIS_QUIT_RUNNING:-$([ -n "${JARVIS_APP_DIR:-}" ] && echo 0 || echo 1)}"
 BUILD_DIR="${JARVIS_BUILD_DIR:-${HOME}/Library/Caches/JarvisApp}"
@@ -67,19 +69,6 @@ quit_running() {
   wait_until_quit || die "The running app did not quit. Nothing was replaced."
 }
 
-# Prints "identity<TAB>team" for the first Apple Development certificate of another Team.
-local_identity() {
-  local name team
-  while IFS= read -r name; do
-    team=$(security find-certificate -c "$name" -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null \
-      | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p' || true)
-    if [ -n "$team" ] && [ "$team" != "${AUTHOR_TEAM}" ]; then
-      printf '%s\t%s\n' "$name" "$team"
-      return 0
-    fi
-  done < <(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: .*\)".*/\1/p' || true)
-}
-
 summary() {
   echo "✓ $1"
   echo "  App:     ${TARGET} ($(plist_value "${TARGET}" CFBundleShortVersionString))"
@@ -92,14 +81,21 @@ xcodebuild -version >/dev/null 2>&1 \
   || die "Xcode not found (xcode-select points to $(xcode-select -p 2>/dev/null || echo nothing)). Is its volume mounted? Nothing was built."
 command -v xcodegen >/dev/null || die "xcodegen not found: brew install xcodegen. Nothing was built."
 
+MODIFIED=$(git -C "${REPO_ROOT}" diff --name-only HEAD)
+if [ "${MODIFIED}" = "${PBXPROJ}" ]; then
+  echo "Putting back ${PBXPROJ} (xcodegen rewrites it)..."
+  git -C "${REPO_ROOT}" checkout -- "${PBXPROJ}"
+elif [ -n "${MODIFIED}" ]; then
+  echo "${MODIFIED}" >&2
+  die "The checkout has modified files: commit or discard them. Nothing was touched, built or installed."
+fi
+
 echo "Pulling..."
 if ! PULL=$(git -C "${REPO_ROOT}" pull --ff-only 2>&1); then
   echo "${PULL}" >&2
   die "git pull --ff-only failed: nothing was built or installed. The checkout was left as it was."
 fi
 HASH=$(git -C "${REPO_ROOT}" rev-parse HEAD)
-DIRTY=$(git -C "${REPO_ROOT}" status --porcelain | wc -l | tr -d ' ')
-[ "${DIRTY}" = "0" ] || echo "${DIRTY} uncommitted change(s) in the checkout: left alone and not built."
 
 if [ -e "${TARGET}" ]; then
   EXISTING=$(plist_value "${TARGET}" CFBundleIdentifier)
@@ -112,16 +108,13 @@ if [ -e "${TARGET}" ]; then
   fi
 fi
 
-IDENTITY="-"
-TEAM=""
-if [ -n "${JARVIS_SIGN_IDENTITY:-}" ]; then
-  IDENTITY="${JARVIS_SIGN_IDENTITY}"
-else
-  LOCAL=$(local_identity)
-  if [ -n "${LOCAL}" ]; then
-    IDENTITY="${LOCAL%%$'\t'*}"
-    TEAM="${LOCAL##*$'\t'}"
-  fi
+IDENTITY="${JARVIS_SIGN_IDENTITY:-}"
+if [ -z "${IDENTITY}" ]; then
+  IDENTITIES=$(security find-identity -v -p codesigning 2>/dev/null || true)
+  case "${IDENTITIES}" in
+    *"\"${LOCAL_IDENTITY}\""*) IDENTITY="${LOCAL_IDENTITY}" ;;
+    *) IDENTITY="-" ;;
+  esac
 fi
 
 echo "Building ${HASH} (Release, signed with: ${IDENTITY})..."
@@ -141,7 +134,7 @@ SHORT_HASH=$(git -C "${SOURCE}" rev-parse --short HEAD)
 xcodebuild -project NotchBuddy.xcodeproj -scheme NotchBuddy -configuration Release \
   -derivedDataPath "${DERIVED}" SYMROOT="${DERIVED}/Build/Products" \
   OBJROOT="${DERIVED}/Build/Intermediates.noindex" ONLY_ACTIVE_ARCH=YES \
-  CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="${IDENTITY}" DEVELOPMENT_TEAM="${TEAM}" \
+  CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="${IDENTITY}" DEVELOPMENT_TEAM= \
   PROVISIONING_PROFILE_SPECIFIER= OTHER_CODE_SIGN_FLAGS= \
   CODE_SIGN_ENTITLEMENTS="${SOURCE}/NotchBuddy/Resources/Coucou.entitlements" SWIFT_ACTIVE_COMPILATION_CONDITIONS= \
   build >>"${LOG}" 2>&1 || { grep -E "error:" "${LOG}" | head -20 >&2 || true; die "Build failed (${LOG}). Nothing was installed."; }
