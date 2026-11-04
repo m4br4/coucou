@@ -142,11 +142,42 @@ check "pbxproj put back is reported" 'out_has "Putting back"'
 check "pbxproj install has the new commit" '[ "$(installed)" = three ]'
 check "checkout clean after putting pbxproj back" '[ -z "$(git -C "$T/repo" status --porcelain)" ]'
 
+# project.pbxproj staged: put back too, index included.
+echo regenerated > "$PBXPROJ"
+git -C "$T/repo" add NotchBuddy/NotchBuddy.xcodeproj/project.pbxproj
+push_from_other marker.txt staged
+check "staged pbxproj installs" 'run'
+check "staged pbxproj put back" '[ "$(cat "$PBXPROJ")" = tracked ]'
+check "checkout clean after a staged pbxproj" '[ -z "$(git -C "$T/repo" status --porcelain)" ]'
+check "staged pbxproj install has the new commit" '[ "$(installed)" = staged ]'
+
+# Another staged file with project.pbxproj modified: stops, touches nothing.
+echo mine > "$T/repo/marker.txt"
+git -C "$T/repo" add marker.txt
+echo regenerated > "$PBXPROJ"
+check "other staged file fails" '! run'
+check "other staged file is named" 'out_has "marker.txt"'
+check "pbxproj kept with another staged file" '[ "$(cat "$PBXPROJ")" = regenerated ]'
+check "other file stays staged" '[ "$(git -C "$T/repo" diff --cached --name-only)" = marker.txt ]'
+git -C "$T/repo" reset -q --hard HEAD
+
+# project.pbxproj modified and an untracked file: put back, named, goes on.
+echo regenerated > "$PBXPROJ"
+echo new > "$T/repo/NotchBuddy/New.swift"
+push_from_other marker.txt with-untracked
+check "pbxproj with an untracked file installs" 'run'
+check "untracked file is named" 'out_has "Untracked, left out of the build: NotchBuddy/New.swift"'
+check "pbxproj put back with an untracked file" '[ "$(cat "$PBXPROJ")" = tracked ]'
+check "untracked file kept" '[ "$(cat "$T/repo/NotchBuddy/New.swift")" = new ]'
+check "untracked file install has the new commit" '[ "$(installed)" = with-untracked ]'
+rm "$T/repo/NotchBuddy/New.swift"
+
 # Untracked files do not count and stay.
 mkdir -p "$T/repo/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace/xcshareddata"
 echo mine > "$T/repo/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace/xcshareddata/x"
 push_from_other marker.txt three-b
 check "untracked file does not stop it" 'run'
+check "untracked folder is named" 'out_has "project.xcworkspace/"'
 check "untracked file stays" '[ "$(cat "$T/repo/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace/xcshareddata/x")" = mine ]'
 check "untracked file is not built" '[ ! -e "$T/build/source/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace/xcshareddata" ]'
 rm -rf "$T/repo/NotchBuddy/NotchBuddy.xcodeproj/project.xcworkspace"
@@ -186,9 +217,16 @@ HEAD_BEFORE=$(git -C "$T/repo" rev-parse HEAD)
 BUILDS_BEFORE=$(builds)
 check "blocked pull fails" '! run'
 check "failed pull is explained" 'out_has "git pull --ff-only failed"'
+check "failed pull says the checkout is as it was" 'out_has "The checkout was left as it was."'
 check "file survives a failed pull" '[ "$(cat "$T/repo/incoming.txt")" = mine ]'
 check "head stays after a failed pull" '[ "$(git -C "$T/repo" rev-parse HEAD)" = "$HEAD_BEFORE" ]'
 check "nothing built after a failed pull" '[ "$(builds)" = "$BUILDS_BEFORE" ]'
+
+# The same pull after putting project.pbxproj back says so.
+echo regenerated > "$PBXPROJ"
+check "pull blocked after pbxproj fails" '! run'
+check "failed pull says pbxproj was put back" 'out_has "project.pbxproj was put back"'
+check "failed pull does not claim an untouched checkout" '! out_has "left as it was"'
 rm "$T/repo/incoming.txt"
 
 # Diverged history: same.

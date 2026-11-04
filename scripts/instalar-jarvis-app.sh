@@ -4,7 +4,7 @@
 #
 # xcodegen and the build run in a clone, never in the checkout. Before pulling, a modified
 # project.pbxproj is put back (xcodegen rewrites it anyway); any other modified file stops
-# the script with nothing touched.
+# the script with nothing touched. Untracked files stay, and are named: they are not built.
 #
 # Signed without the author's Team or profiles: with the local certificate "IT Crowd Local",
 # so macOS keeps the app's permissions and Keychain access from one build to the next, or
@@ -81,10 +81,12 @@ xcodebuild -version >/dev/null 2>&1 \
   || die "Xcode not found (xcode-select points to $(xcode-select -p 2>/dev/null || echo nothing)). Is its volume mounted? Nothing was built."
 command -v xcodegen >/dev/null || die "xcodegen not found: brew install xcodegen. Nothing was built."
 
+CHECKOUT_STATE="The checkout was left as it was."
 MODIFIED=$(git -C "${REPO_ROOT}" diff --name-only HEAD)
 if [ "${MODIFIED}" = "${PBXPROJ}" ]; then
   echo "Putting back ${PBXPROJ} (xcodegen rewrites it)..."
-  git -C "${REPO_ROOT}" checkout -- "${PBXPROJ}"
+  git -C "${REPO_ROOT}" checkout HEAD -- "${PBXPROJ}"
+  CHECKOUT_STATE="${PBXPROJ} was put back; nothing else in the checkout changed."
 elif [ -n "${MODIFIED}" ]; then
   echo "${MODIFIED}" >&2
   die "The checkout has modified files: commit or discard them. Nothing was touched, built or installed."
@@ -93,9 +95,11 @@ fi
 echo "Pulling..."
 if ! PULL=$(git -C "${REPO_ROOT}" pull --ff-only 2>&1); then
   echo "${PULL}" >&2
-  die "git pull --ff-only failed: nothing was built or installed. The checkout was left as it was."
+  die "git pull --ff-only failed: nothing was built or installed. ${CHECKOUT_STATE}"
 fi
 HASH=$(git -C "${REPO_ROOT}" rev-parse HEAD)
+UNTRACKED=$(git -C "${REPO_ROOT}" ls-files --others --exclude-standard --directory | tr '\n' ' ')
+[ -z "${UNTRACKED}" ] || echo "Untracked, left out of the build: ${UNTRACKED}"
 
 if [ -e "${TARGET}" ]; then
   EXISTING=$(plist_value "${TARGET}" CFBundleIdentifier)
