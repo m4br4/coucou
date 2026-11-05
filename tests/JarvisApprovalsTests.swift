@@ -162,6 +162,13 @@ enum JarvisApprovalsTests {
         let b = J.Report(id: "X", titulo: "t", informe: "b.md", permite: ["^a$"], decision: .pendiente, huella: "2")
         check("same id, two files, two keys", a.key != b.key)
 
+        // MARK: what a request allows
+        check("request: the same huella goes", J.requestAllows(requested: a, current: a))
+        check("request: another huella of the same file doesn't",
+              !J.requestAllows(requested: a, current: J.Report(id: "X", titulo: "t", informe: "a.md", permite: ["^a$"], decision: .pendiente, huella: "9")))
+        check("request: another report is another matter", J.requestAllows(requested: a, current: b))
+        check("request: none, nothing to compare", J.requestAllows(requested: nil, current: a))
+
         // MARK: Approve waits
         let shown = Date(timeIntervalSince1970: 1000)
         check("armed: not at once", !J.isArmed(shownAt: shown, now: shown))
@@ -277,6 +284,14 @@ enum JarvisApprovalsTests {
         check("espera: over after 10 minutes", !cooldown.isWaiting(id: "a", huella: hash, now: start.addingTimeInterval(600)))
         check("espera: another huella is another report", !cooldown.isWaiting(id: "a", huella: lookalike, now: start))
         check("espera: another id too", !cooldown.isWaiting(id: "b", huella: hash, now: start))
+
+        // MARK: a request given up on
+        let taken = R.Ticket()
+        check("ticket: the card goes first", taken.take())
+        check("ticket: then the wait can't give up", !taken.abandon())
+        let abandoned = R.Ticket()
+        check("ticket: the wait gives up first", abandoned.abandon())
+        check("ticket: then no card", !abandoned.take())
 
         // MARK: admitting
         func admit(_ reports: [J.Report], busy: Bool = false, cooldown: R.Cooldown = R.Cooldown(), limiter: R.Limiter = R.Limiter()) -> R.Failure? {

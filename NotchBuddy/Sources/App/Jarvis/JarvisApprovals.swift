@@ -148,6 +148,13 @@ enum JarvisApprovals {
         return seen == current
     }
 
+    /// A card HQ asked for only approves what HQ asked for: the same report with another huella
+    /// is not what Abraham read, even with the same title and patterns.
+    static func requestAllows(requested: Report?, current: Report?) -> Bool {
+        guard let requested, let current, requested.key == current.key else { return true }
+        return requested.huella == current.huella
+    }
+
     /// Every .md under informes/, skipping names starting with "." or "_" (templates, used
     /// files), names with control characters, and symlinks.
     static func reportFiles(in dir: URL) -> [URL] {

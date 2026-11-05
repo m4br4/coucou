@@ -1,5 +1,6 @@
 #if !APPSTORE
 import Foundation
+import os
 
 // MARK: - JarvisRequest
 //
@@ -61,6 +62,31 @@ enum JarvisRequest {
     static func stateReply(watching: Bool) -> String { "{\"v\":1,\"ok\":\(watching)}\n" }
     static let opened = "{\"v\":1,\"ok\":true,\"estado\":\"en-tarjeta\"}\n"
     static func reply(_ failure: Failure) -> String { "{\"v\":1,\"ok\":false,\"error\":\"\(failure.rawValue)\"}\n" }
+
+    /// A request and the thread waiting for it: whoever comes first wins. A request given up on
+    /// must not open a card later: HQ already said it failed, and it would call the card foreign.
+    final class Ticket: Sendable {
+        private enum State { case waiting, taken, abandoned }
+        private let state = OSAllocatedUnfairLock(initialState: State.waiting)
+
+        /// The card is about to open. False if the wait is already over.
+        func take() -> Bool {
+            state.withLock {
+                guard $0 == .waiting else { return false }
+                $0 = .taken
+                return true
+            }
+        }
+
+        /// The wait is over. False if the card is already on its way, so its answer is coming.
+        func abandon() -> Bool {
+            state.withLock {
+                guard $0 == .waiting else { return false }
+                $0 = .abandoned
+                return true
+            }
+        }
+    }
 
     // MARK: Limits (in memory)
 

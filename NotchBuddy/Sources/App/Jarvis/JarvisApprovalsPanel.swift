@@ -23,6 +23,11 @@ final class JarvisApprovalStore: ObservableObject {
     @Published private(set) var busy = false
     /// When Approve may take a click again: JarvisApprovals.armDelay after the card last changed.
     @Published private(set) var shownAt = Date.distantPast
+    /// The report on the card, once it left the list. The card stays on it, unable to approve,
+    /// until Siguiente: nobody chooses what comes up under the pointer by deleting a file.
+    @Published private(set) var missing: JarvisApprovals.Report?
+    /// The report HQ asked for, while its card is out: it stays open until Abraham closes it.
+    @Published private(set) var requested: JarvisApprovals.Report?
 
     private var stream: FSEventStreamRef?
     private var watched: String?
@@ -35,17 +40,31 @@ final class JarvisApprovalStore: ObservableObject {
     private var vaultLimiter = JarvisRequest.Limiter()
     private var socketLimiter = JarvisRequest.Limiter()
     private var cooldown = JarvisRequest.Cooldown()
-    /// The report HQ asked for, while its card is out: it stays open until Abraham closes it.
-    private var requested: JarvisApprovals.Report?
     private var requestedCardAppeared = false
+    /// Decided here: its leaving the list is no surprise.
+    private var settled: String?
 
     /// The socket's threads read it without hopping to the main thread.
     nonisolated private static let watching = OSAllocatedUnfairLock(initialState: false)
 
     var isHoldingCard: Bool { requested != nil }
 
+    /// Touch ID, the Apple Watch or the Mac's password.
+    var confirmOwner: @Sendable (String) async -> Bool = { await JarvisApprovalStore.ownerConfirms(reason: $0) }
+
     var vault: URL { JarvisLink.expand(JarvisSettings.vaultPath) }
-    var current: JarvisApprovals.Report? { pending.indices.contains(index) ? pending[index] : pending.first }
+    var current: JarvisApprovals.Report? { missing ?? (pending.indices.contains(index) ? pending[index] : pending.first) }
+
+    /// Why Approve stays off, whatever was seen.
+    var warning: String? {
+        if missing != nil { return "Ese informe ya no está." }
+        if !JarvisApprovals.requestAllows(requested: requested, current: current) {
+            return "El informe cambió: pídelo otra vez desde HQ."
+        }
+        return nil
+    }
+
+    var canAdvance: Bool { missing == nil ? pending.count > 1 : !pending.isEmpty }
 
     func start() {
         observeCard()
@@ -98,11 +117,17 @@ final class JarvisApprovalStore: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             let shown = self.current
             self.pending = list
-            self.index = list.firstIndex { $0.key == shown?.key } ?? 0
-            if let shown, let now = self.current, now.key == shown.key, now.huella != shown.huella {
-                self.status = "El informe cambió: revísalo otra vez."
+            if let position = list.firstIndex(where: { $0.key == shown?.key }) {
+                self.index = position
+                self.missing = nil
+                if list[position].huella != shown?.huella { self.status = "El informe cambió: revísalo otra vez." }
+            } else if let shown, self.isCardOpen, shown.key != self.settled {
+                self.missing = shown
+            } else {
+                self.index = 0
+                self.missing = nil
+                self.settled = nil
             }
-            if let requested = self.requested, !list.contains(where: { $0.key == requested.key }) { self.requested = nil }
             // A new report opens the card once; while the notch is busy it waits for the next look.
             // An open card stays on its report: the new one shows up in the count.
             let fresh = list.filter { !self.seen.contains($0.key) }
@@ -176,20 +201,24 @@ final class JarvisApprovalStore: ObservableObject {
         case .solicitar(let id, let huella):
             let done = DispatchSemaphore(value: 0)
             let reply = OSAllocatedUnfairLock<String?>(initialState: nil)
+            let ticket = JarvisRequest.Ticket()
             Task { @MainActor in
-                let text = await JarvisApprovalStore.shared.open(id: id, huella: huella)
+                let text = await JarvisApprovalStore.shared.open(id: id, huella: huella, ticket: ticket)
                 reply.withLock { $0 = text }
                 done.signal()
             }
             // Within the 2 s HQ waits.
-            guard done.wait(timeout: .now() + 1.8) == .success else { return nil }
+            if done.wait(timeout: .now() + 1.8) != .success {
+                if ticket.abandon() { return nil }
+                done.wait()
+            }
             return reply.withLock { $0 }
         }
     }
 
     /// Always from disk: `pending` may be a second old. No sound and no notification, and Touch
     /// ID only comes with the click on Approve.
-    private func open(id: String, huella: String) async -> String {
+    private func open(id: String, huella: String, ticket: JarvisRequest.Ticket) async -> String? {
         let vault = vault
         let list = await Task.detached { JarvisApprovals.listPending(vault: vault) }.value
         let now = Date()
@@ -198,9 +227,11 @@ final class JarvisApprovalStore: ObservableObject {
         case .failure(let failure):
             return JarvisRequest.reply(failure)
         case .success(let report):
+            guard ticket.take() else { return nil }
             socketLimiter.record(id, now: now)
             pending = list.filter { $0.decision == .pendiente }
             index = pending.firstIndex(of: report) ?? 0
+            missing = nil
             seen.insert(report.key)
             status = nil
             requested = report
@@ -211,8 +242,9 @@ final class JarvisApprovalStore: ObservableObject {
         }
     }
 
-    /// Abraham put the requested card away (Luego, Escape, another view): no `espera` for a card
-    /// that folded by itself, which is why it is held open until then.
+    /// Abraham put the requested card away: Luego, or an explicit collapse. Only then `espera`:
+    /// not for a card that folded by itself, which is why it is held open, nor for one that
+    /// another view took over.
     func requestedCardClosed() {
         guard let report = requested else { return }
         cooldown.add(id: report.id, huella: report.huella, now: Date())
@@ -225,10 +257,13 @@ final class JarvisApprovalStore: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] mode, view in
                 MainActor.assumeIsolated {
-                    guard let self, self.requested != nil else { return }
-                    let open = mode == .expanded && view == .jarvisApprovals
-                    if open { self.requestedCardAppeared = true }
-                    else if self.requestedCardAppeared { self.requestedCardClosed() }
+                    guard let self else { return }
+                    if mode == .expanded && view == .jarvisApprovals {
+                        if self.requested != nil { self.requestedCardAppeared = true }
+                        return
+                    }
+                    self.missing = nil
+                    if self.requestedCardAppeared { self.requested = nil }
                 }
             }
             .store(in: &observers)
@@ -239,7 +274,7 @@ final class JarvisApprovalStore: ObservableObject {
 
     func next() {
         guard !pending.isEmpty else { return }
-        index = (index + 1) % pending.count
+        if missing != nil { missing = nil } else { index = (index + 1) % pending.count }
         status = nil
     }
 
@@ -256,7 +291,7 @@ final class JarvisApprovalStore: ObservableObject {
     /// prompt); then JarvisApprovals.approve checks it against the file and writes `seen`'s
     /// own permite.
     func approve(_ seen: JarvisApprovals.Report) async {
-        guard !busy, JarvisApprovals.isArmed(shownAt: shownAt, now: Date()) else { return }
+        guard !busy, warning == nil, JarvisApprovals.isArmed(shownAt: shownAt, now: Date()) else { return }
         guard JarvisApprovals.mayApprove(seen: seen, current: current) else {
             status = "El informe cambió: revisa los patrones otra vez."
             return
@@ -265,11 +300,11 @@ final class JarvisApprovalStore: ObservableObject {
         defer { busy = false }
         let report = seen
         let code = JarvisApprovals.shortCode(report.huella)
-        guard await Self.ownerConfirms(reason: "aprobar \(report.id) de Jarvis, código \(code)") else {
+        guard await confirmOwner("aprobar \(report.id) de Jarvis, código \(code)") else {
             status = "Sin Touch ID o contraseña no se aprueba nada."
             return
         }
-        guard JarvisApprovals.mayApprove(seen: report, current: current) else {
+        guard warning == nil, JarvisApprovals.mayApprove(seen: report, current: current) else {
             status = "El informe cambió durante Touch ID: revisa los patrones otra vez."
             return
         }
@@ -279,6 +314,7 @@ final class JarvisApprovalStore: ObservableObject {
             log("approved \(report.id)")
             status = "Aprobado: \(name)."
             requested = nil
+            settled = report.key
         } catch {
             log("approval of \(report.id) failed")
             status = Self.describe(error)
@@ -296,6 +332,7 @@ final class JarvisApprovalStore: ObservableObject {
             log("rejected \(report.id)")
             status = "Rechazado: \(name)."
             requested = nil
+            settled = report.key
             rescan()
             return true
         } catch {
@@ -364,14 +401,14 @@ struct JarvisApprovalsCardView: View {
 
     @ViewBuilder private var content: some View {
         if let report = store.current {
-            title(store.pending.count > 1 ? "Aprobación de Jarvis · \(store.index + 1) de \(store.pending.count)"
-                                           : "Aprobación de Jarvis")
+            title(store.pending.count > 1 && store.missing == nil
+                  ? "Aprobación de Jarvis · \(store.index + 1) de \(store.pending.count)" : "Aprobación de Jarvis")
             field("Tarea", report.id)
             field("Acción", report.titulo)
             field("Código", "\(JarvisApprovals.shortCode(report.huella)) · "
                 + JarvisApprovals.ageText(since: report.changedAt, now: Date()))
             permite(report)
-            if let status = store.status { line(status) }
+            if let notice = store.warning ?? store.status { line(notice) }
             if rejecting {
                 HStack(spacing: 6) {
                     TextField(text: $motivo) { Text(verbatim: "Motivo del rechazo…") }
@@ -390,7 +427,7 @@ struct JarvisApprovalsCardView: View {
                 }
             } else {
                 HStack(spacing: 8) {
-                    let enabled = armed && report.permiteIsValid && !store.busy
+                    let enabled = armed && store.warning == nil && report.permiteIsValid && !store.busy
                         && JarvisApprovals.mayApprove(seen: seen, current: report)
                     PrimaryButton(verbatim: "Aprobar") {
                         // The report that was seen, never the latest one.
@@ -399,7 +436,7 @@ struct JarvisApprovalsCardView: View {
                         .disabled(!enabled)
                         .opacity(enabled ? 1 : 0.4)
                     SecondaryButton(verbatim: "Rechazar") { rejecting = true }
-                    if store.pending.count > 1 { SecondaryButton(verbatim: "Siguiente") { store.next() } }
+                    if store.canAdvance { SecondaryButton(verbatim: "Siguiente") { store.next() } }
                     SecondaryButton(verbatim: "Luego") { store.later() }
                 }
             }
