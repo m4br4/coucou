@@ -149,6 +149,7 @@ final class VoiceEngine: ObservableObject {
         if isEnabled && !isPaused { startAudioPipeline() }
         else {
             pendingCommands.dropAll()
+            EnglishPracticeSession.shared.end()
             stopAudioPipeline()
         }
     }
@@ -156,6 +157,7 @@ final class VoiceEngine: ObservableObject {
     private func updatePause() {
         if isPaused {
             pendingCommands.dropAll()
+            EnglishPracticeSession.shared.end()
             stopAudioPipeline()
         } else if isEnabled { startAudioPipeline() }
     }

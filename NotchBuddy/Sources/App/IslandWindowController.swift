@@ -626,6 +626,9 @@ final class IslandWindowController: NSWindowController {
         finishedPinTimer?.cancel()
         #if !APPSTORE
         VoiceSpeaker.shared.stop()
+        // Closing the island leaves the practice. The end of a turn doesn't come through here:
+        // silence keeps it for 90 s.
+        EnglishPracticeSession.shared.end()
         if isInConversation || AppState.shared.voiceActive {
             // Closing the island ends the voice exchange (speech was just cut, so its
             // "finished" callback will not come): reset everything that it would have.
@@ -1498,11 +1501,11 @@ extension IslandWindowController {
             EnglishPracticeSession.shared.end()
             sayAndContinue(EnglishPractice.closing, keepListening: false)
             return
+        case .turn:
+            await englishPracticeTurn(transcript)
+            return
         case .none:
-            if EnglishPractice.isActive {
-                await englishPracticeTurn(transcript)
-                return
-            }
+            break
         }
 
         // ── Conversation end phrase ────────────────────────────────────────────────

@@ -8,7 +8,8 @@ import os
 // No Claude or AppKit dependency — testable with standalone swiftc.
 
 enum EnglishPractice {
-    enum Command: Equatable { case start, stop, none }
+    /// `none`: the turn is not the practice's, Jarvis takes it.
+    enum Command: Equatable { case start, stop, turn, none }
 
     enum Level: String, CaseIterable, Identifiable {
         case basic, intermediate
@@ -35,12 +36,12 @@ enum EnglishPractice {
                                        "practice english", "practice my english"]
     private static let stopPhrases  = ["volvamos al espanol", "volver al espanol", "regresemos al espanol"]
 
-    /// `active`: already practicing, so only leaving means something. «ya» has to be the whole
-    /// turn: inside a sentence it is just a word.
+    /// `active`: already practicing, so every turn is the practice's except leaving. «ya» has to
+    /// be the whole turn: inside a sentence it is just a word.
     static func command(for transcript: String, active: Bool) -> Command {
         let text = plain(transcript)
         if active {
-            return text == "ya" || stopPhrases.contains(where: text.contains) ? .stop : .none
+            return text == "ya" || stopPhrases.contains(where: text.contains) ? .stop : .turn
         }
         return startPhrases.contains(where: text.contains) ? .start : .none
     }
@@ -50,6 +51,36 @@ enum EnglishPractice {
             .components(separatedBy: .punctuationCharacters).joined()
             .components(separatedBy: .symbols).joined()
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    /// What Claude gets: the opening, then the turns. The session can end during a call, so a
+    /// turn is only taken back if it is still the last one.
+    struct History {
+        private static let maxMessages = 20
+        private(set) var messages: [[String: Any]] = []
+
+        mutating func begin() {
+            messages = [["role": "user", "content": "Let's practice English."],
+                        ["role": "assistant", "content": EnglishPractice.opening]]
+        }
+
+        mutating func clear() { messages = [] }
+
+        mutating func add(turn: String) {
+            messages.append(["role": "user", "content": turn])
+            // By pairs: the history has to keep starting with the user.
+            while messages.count > Self.maxMessages { messages.removeFirst(2) }
+        }
+
+        mutating func add(answer: String) {
+            messages.append(["role": "assistant", "content": answer])
+        }
+
+        mutating func takeBack(turn: String) {
+            guard let last = messages.last, last["role"] as? String == "user",
+                  last["content"] as? String == turn else { return }
+            messages.removeLast()
+        }
     }
 
     /// Opens every session: it costs no call, and it can't fail.

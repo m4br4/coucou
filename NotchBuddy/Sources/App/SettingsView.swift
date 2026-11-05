@@ -1608,14 +1608,14 @@ struct SettingsView: View {
                 }
 
                 if ttsEngine == "local" {
-                    localVoicePicker("Voz en español", language: "es", selection: $localVoiceEs)
-                    localVoicePicker("Voz en inglés", language: "en", selection: $localVoiceEn)
+                    localVoiceChoice("Voz en español", language: "es", selection: $localVoiceEs)
+                    localVoiceChoice("Voz en inglés", language: "en", selection: $localVoiceEn)
                 }
 
                 if ttsEngine == "system" {
                     VStack(alignment: .leading, spacing: 6) {
-                        macVoicePicker("Voz en español", language: "es", selection: $macVoiceEs)
-                        macVoicePicker("Voz en inglés", language: "en", selection: $macVoiceEn)
+                        macVoiceChoice("Voz en español", language: "es", selection: $macVoiceEs)
+                        macVoiceChoice("Voz en inglés", language: "en", selection: $macVoiceEn)
                     }
                     .onAppear { reloadMacVoices() }
                     .onReceive(NotificationCenter.default.publisher(for: AVSpeechSynthesizer.availableVoicesDidChangeNotification)) { _ in
@@ -1660,19 +1660,19 @@ struct SettingsView: View {
         macVoices = VoiceSpeaker.macVoices()
     }
 
-    private func macVoicePicker(_ title: String, language: String, selection: Binding<String>) -> some View {
-        voicePicker(title, language: language, selection: selection) {
+    private func macVoiceChoice(_ title: String, language: String, selection: Binding<String>) -> some View {
+        voiceChoice(title, language: language, selection: selection) {
             ForEach(VoiceSpeech.offered(macVoices, language: language)) { Text(verbatim: $0.label).tag($0.id) }
         }
     }
 
-    private func localVoicePicker(_ title: String, language: String, selection: Binding<String>) -> some View {
-        voicePicker(title, language: language, selection: selection) {
+    private func localVoiceChoice(_ title: String, language: String, selection: Binding<String>) -> some View {
+        voiceChoice(title, language: language, selection: selection) {
             ForEach(VoiceSpeech.localVoices.filter { $0.language == language }) { Text(verbatim: $0.name).tag($0.id) }
         }
     }
 
-    private func voicePicker<Voices: View>(_ title: String, language: String, selection: Binding<String>,
+    private func voiceChoice<Voices: View>(_ title: String, language: String, selection: Binding<String>,
                                            @ViewBuilder voices: () -> Voices) -> some View {
         HStack(spacing: 8) {
             Text(verbatim: title)
