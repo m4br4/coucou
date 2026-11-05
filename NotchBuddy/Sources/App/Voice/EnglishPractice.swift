@@ -53,6 +53,27 @@ enum EnglishPractice {
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
+    /// A turn with no words closes like an unanswered question, which starts the 90 s the
+    /// practice lasts: it has no other expiry, and the listening that led here cancelled that one.
+    static func silenceClosesTurn(inConversation: Bool, active: Bool) -> Bool {
+        inConversation || active
+    }
+
+    enum NoReply: Equatable {
+        /// Claude failed: say so, the practice stops.
+        case apologize
+        /// The practice ended during the wait (pause, voice off): only the turn is left to close.
+        case closeTurn
+        /// A new wake word owns the notch now: closing would cut it.
+        case nothing
+    }
+
+    /// Claude's answer never came. `sameTurn`: nothing woke Coucou since the question.
+    static func noReply(active: Bool, sameTurn: Bool) -> NoReply {
+        guard sameTurn else { return .nothing }
+        return active ? .apologize : .closeTurn
+    }
+
     /// What Claude gets: the opening, then the turns. The session can end during a call, so a
     /// turn is only taken back if it is still the last one.
     struct History {

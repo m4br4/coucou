@@ -30,6 +30,8 @@ final class IslandWindowController: NSWindowController {
     /// Context (last action, on-device model session) is kept a little after a turn so
     /// "OK Coucou, et Stripe aussi" still works; this resets it.
     private var voiceContextExpiry: DispatchWorkItem?
+    /// Counts wake words and re-listens: tells a turn it is no longer the latest.
+    private var voiceWakes = 0
     private var conversationContext = ConversationContext()
     private var consecutiveFailures = 0
     private var hasSpokenPasCompris = false
@@ -344,6 +346,7 @@ final class IslandWindowController: NSWindowController {
                 AppState.shared.voiceActive = true
                 AppState.shared.voiceSubState = .listening
                 self?.voiceContextExpiry?.cancel()
+                self?.voiceWakes += 1
                 if !isDirect {
                     VoiceActionRunner.shared.pendingQuestion = nil
                     // The island stays compact now: the tick says "I heard OK Coucou".
@@ -375,7 +378,8 @@ final class IslandWindowController: NSWindowController {
                         AppState.shared.voiceResult = result
                         self.expand(to: .voiceResult)
                         self.scheduleVoiceDismiss(delay: 1.5)
-                    } else if self.isInConversation {
+                    } else if EnglishPractice.silenceClosesTurn(inConversation: self.isInConversation,
+                                                                active: EnglishPractice.isActive) {
                         // No answer to Coucou's question: stop listening.
                         self.closeVoiceTurn()
                     } else {
@@ -1912,13 +1916,20 @@ extension IslandWindowController {
         // A stale "finished speaking" handler must not reopen the mic during the wait.
         VoiceSpeaker.shared.onDidFinish = nil
         AppState.shared.voiceSubState = .thinking
+        let wakes = voiceWakes
         if let reply = await EnglishPracticeSession.shared.respond(to: transcript) {
             VoiceTranscriptHistory.shared.record(transcript: transcript, note: reply, origin: .brain)
             sayAndContinue(reply, keepListening: true)
-        } else if EnglishPractice.isActive {
-            let sorry = EnglishPractice.unreachable
-            sayAndContinue(sorry, keepListening: false)
+            return
+        }
+        switch EnglishPractice.noReply(active: EnglishPractice.isActive, sameTurn: wakes == voiceWakes) {
+        case .apologize:
+            sayAndContinue(EnglishPractice.unreachable, keepListening: false)
             EnglishPracticeSession.shared.end()
+        case .closeTurn:
+            closeVoiceTurn()
+        case .nothing:
+            break
         }
     }
 

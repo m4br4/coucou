@@ -541,6 +541,15 @@ enum VoiceAudioTests {
             check("set off", !E.isActive)
             check("after the end, the next command is Jarvis's", E.command(for: "abre Spotify", active: E.isActive) == .none)
 
+            check("silence in practice closes the turn, so its 90 s start",
+                  E.silenceClosesTurn(inConversation: false, active: true))
+            check("silence after a question closes the turn", E.silenceClosesTurn(inConversation: true, active: false))
+            check("a stray wake word stays as it was", !E.silenceClosesTurn(inConversation: false, active: false))
+            check("Claude failed in practice", E.noReply(active: true, sameTurn: true) == .apologize)
+            check("paused during the wait: the turn closes", E.noReply(active: false, sameTurn: true) == .closeTurn)
+            check("a new wake word is not cut", E.noReply(active: false, sameTurn: false) == .nothing)
+            check("a new wake word in practice is not cut either", E.noReply(active: true, sameTurn: false) == .nothing)
+
             var history = E.History()
             history.begin()
             check("the history starts with the opening", history.messages.count == 2
