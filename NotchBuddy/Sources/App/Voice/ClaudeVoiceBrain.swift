@@ -20,6 +20,7 @@ final class ClaudeVoiceBrain {
         let text: String      // spoken and shown
         let acted: Bool       // a tool changed something (pills, music, mail…)
         let failed: Bool      // nothing usable came back
+        var shown: String? = nil   // on screen, when it isn't what is read aloud
     }
 
     /// Claude is Coucou's brain whenever an Anthropic key is saved (Settings → Chat).
@@ -30,8 +31,11 @@ final class ClaudeVoiceBrain {
     private var messages: [[String: Any]] = []
     /// One turn at a time: a second "OK Coucou" during the wait must not interleave.
     private var busy = false
+    /// A report of the vault is in `messages`: agents write them and they may quote web
+    /// pages, so to Claude they count as third-party text.
+    private var vaultText = false
 
-    func reset() { messages = [] }
+    func reset() { messages = []; vaultText = false }
 
     // MARK: Turn
 
@@ -39,14 +43,33 @@ final class ClaudeVoiceBrain {
         guard !busy else { return nil }
         busy = true
         defer { busy = false; repairHistory() }
+
+        // The vault first, without asking Claude. A mail being written keeps its own words.
+        let awaiting = JarvisVault.asksBack(messages) || AppState.shared.voiceMailDraft != nil
+        let vaultMiss: Bool
+        switch await JarvisVoice.vaultTurn(transcript, awaitingAnswer: awaiting) {
+        case .answered(let shown, let answer, let fromVault):
+            JarvisTurn.set(true)
+            messages.append(["role": "user", "content": transcript])
+            messages.append(["role": "assistant", "content": [["type": "text", "text": shown]]])
+            trimHistory()
+            if fromVault { vaultText = true }
+            let text = fromVault ? JarvisLink.spokenReply(VoiceQuery.spokenText(answer)).text : answer
+            return Reply(text: text, acted: false, failed: false, shown: fromVault ? shown : nil)
+        case .pass(let miss):
+            vaultMiss = miss
+            if miss { JarvisTurn.set(true) }
+        }
+
         messages.append(["role": "user", "content": transcript])
         trimHistory()
         var acted = false
         var spoken = ""
+        var usedWeb = false
 
         // Claude may call several tools in a row (look up, then act): at most 5 rounds.
         for _ in 0..<5 {
-            guard let turn = await ClaudeService.shared.voiceTurn(system: Self.systemPrompt(),
+            guard let turn = await ClaudeService.shared.voiceTurn(system: Self.systemPrompt() + (vaultMiss ? JarvisVault.webHint : ""),
                                                                    messages: messages,
                                                                    tools: Self.tools) else {
                 // Leave the history coherent: drop the question that got no answer.
@@ -57,6 +80,7 @@ final class ClaudeVoiceBrain {
                 return acted ? Reply(text: "", acted: true, failed: false) : nil
             }
             messages.append(["role": "assistant", "content": turn.content])
+            if JarvisVault.usedWeb(turn.content) { usedWeb = true }
             if let text = claudeResponseText(fromContent: turn.content) { spoken = text }
 
             let uses = turn.content.filter { $0["type"] as? String == "tool_use" }
@@ -72,7 +96,7 @@ final class ClaudeVoiceBrain {
                 let input = use["input"] as? [String: Any] ?? [:]
                 if name == "jarvis" {
                     // `messages` already holds this round: a web result above the call counts.
-                    let answer = await JarvisVoice.handle(input, thirdParty: JarvisLink.hasThirdPartyText(messages))
+                    let answer = await JarvisVoice.handle(input, thirdParty: vaultText || JarvisLink.hasThirdPartyText(messages))
                     jarvisSpoken.append(answer.spoken)
                     if answer.forgetHistory { forget = true }
                     results.append(["type": "tool_result", "tool_use_id": id, "content": answer.toolResult])
@@ -88,12 +112,13 @@ final class ClaudeVoiceBrain {
             if !jarvisSpoken.isEmpty {
                 spoken = jarvisSpoken.joined(separator: " ")
                 messages.append(["role": "assistant", "content": [["type": "text", "text": spoken]]])
-                if forget { messages = [] }
+                if forget { reset() }
                 break
             }
         }
 
-        let text = VoiceQuery.spokenText(spoken)
+        var text = VoiceQuery.spokenText(spoken)
+        if vaultMiss, !text.isEmpty, !acted { text = JarvisVault.missNotice(usedWeb: usedWeb) + " " + text }
         return Reply(text: text, acted: acted, failed: text.isEmpty && !acted)
     }
 

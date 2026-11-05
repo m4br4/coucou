@@ -250,7 +250,27 @@ final class ClaudeService {
             state.stateOverride = nil
             return
         }
+        var vaultMiss = false
+        #if !APPSTORE
+        // The vault first, unless the question is about a file the user dropped here.
+        if case .file = context {} else {
+            let turn = await JarvisVoice.vaultTurn(query, awaitingAnswer: JarvisVault.asksBack(conversationMessages),
+                                                   typedAnnounce: { state.chatHistory.append(ChatMessage(role: .assistant, content: $0)) })
+            switch turn {
+            case .answered(let shown, _, _):
+                conversationMessages.append(["role": "user", "content": [["type": "text", "text": query]]])
+                conversationMessages.append(["role": "assistant", "content": [["type": "text", "text": shown]]])
+                finishChat(shown, state: state)
+                return
+            case .pass(let miss):
+                vaultMiss = miss
+            }
+        }
+        #endif
         guard state.chatProvider == .anthropic else {
+            #if !APPSTORE
+            if vaultMiss { state.chatHistory.append(ChatMessage(role: .assistant, content: JarvisVault.missNotice(usedWeb: false))) }
+            #endif
             await chatOpenAICompatible(query: query, context: context, state: state)
             return
         }
@@ -280,17 +300,21 @@ final class ClaudeService {
 
         conversationMessages.append(["role": "user", "content": userContent])
 
+        var system = systemPrompt
+        #if !APPSTORE
+        if vaultMiss { system += JarvisVault.webHint }
+        #endif
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 4096,
             "tools": webSearchTools,
-            "system": systemPrompt,
+            "system": system,
             "messages": conversationMessages,
         ]
 
         do {
             let data = try await callAPI(body: body, key: key, beta: "web-search-2025-03-05")
-            await handleChatResult(data, state: state)
+            await handleChatResult(data, state: state, vaultMiss: vaultMiss)
         } catch {
             conversationMessages.removeLast()
             await showError(error.localizedDescription, state: state)
@@ -664,7 +688,7 @@ final class ClaudeService {
 
     // MARK: - Chat result handler
 
-    private func handleChatResult(_ data: Data, state: AppState) async {
+    private func handleChatResult(_ data: Data, state: AppState, vaultMiss: Bool = false) async {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let content = json["content"] as? [[String: Any]] else {
             await showError("Unexpected API response.", state: state)
@@ -674,11 +698,17 @@ final class ClaudeService {
         // Store full content (includes tool_use/tool_result blocks) for correct multi-turn context
         conversationMessages.append(["role": "assistant", "content": content])
 
-        guard let text = claudeResponseText(fromContent: content) else {
+        guard var text = claudeResponseText(fromContent: content) else {
             await showError("No response text.", state: state)
             return
         }
+        #if !APPSTORE
+        if vaultMiss { text = JarvisVault.missNotice(usedWeb: JarvisVault.usedWeb(content)) + "\n\n" + text }
+        #endif
+        finishChat(text, state: state)
+    }
 
+    private func finishChat(_ text: String, state: AppState) {
         // Add to display history
         state.chatHistory.append(ChatMessage(role: .assistant, content: text))
 

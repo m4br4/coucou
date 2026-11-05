@@ -1972,10 +1972,10 @@ extension IslandWindowController {
         appendAppLog("nb.log", "[Voice] Claude turn \(Int(Date().timeIntervalSince(t0) * 1000)) ms\(reply.acted ? ", acted" : "")")
         let done = ["fr": "C'est fait.", "es": "Listo."][VoiceSettings.language] ?? "Done."
         let text = reply.text.isEmpty ? done : reply.text
-        VoiceTranscriptHistory.shared.record(transcript: transcript, note: text, origin: .brain)
+        VoiceTranscriptHistory.shared.record(transcript: transcript, note: reply.shown ?? text, origin: .brain)
         consecutiveFailures = 0
         if reply.acted { NotificationCenter.default.post(name: .triggerEmote, object: BotEmote.happy) }
-        VoiceCaptionManager.shared.appendResponse(text)
+        VoiceCaptionManager.shared.appendResponse(reply.shown ?? text)
         let result = VoiceActionResult(outcome: .success, message: text)
         AppState.shared.voiceResult = result
         speakAndContinueConversation(result)

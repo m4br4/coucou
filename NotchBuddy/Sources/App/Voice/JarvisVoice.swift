@@ -233,8 +233,11 @@ enum JarvisVoice {
 
     // MARK: Message for Michael
 
-    private static func message(_ raw: String) async -> Answer {
-        guard let text = JarvisLink.normalizeText(raw, max: JarvisLink.voiceTextMax) else {
+    /// `announce` says the wait has begun; `typed` marks it as written in the chat, which
+    /// shows Michael's reply whole.
+    static func message(_ raw: String, typed: Bool = false,
+                        announce: @MainActor (String) -> Void = { VoiceSpeaker.shared.speak($0, locale: JarvisTurn.locale) }) async -> Answer {
+        guard let text = JarvisLink.normalizeText(raw, max: typed ? JarvisLink.typedTextMax : JarvisLink.voiceTextMax) else {
             return said("¿Qué le digo a Michael?")
         }
         let now = Date()
@@ -250,26 +253,72 @@ enum JarvisVoice {
 
         let id = JarvisLink.messageId(now: now)
         do {
-            try JarvisLink.deliver(JarvisLink.buildMessage(text: text, now: now, id: id), inbox: JarvisSettings.godInbox)
+            try JarvisLink.deliver(JarvisLink.buildMessage(text: text, now: now, id: id, typed: typed), inbox: JarvisSettings.godInbox)
         } catch {
             log("message: delivery failed (\(error))")
             return said("No pude dejarle el mensaje a Michael.")
         }
         log("message: delivered, waiting for the reply")
         // The wait can be long: say so instead of going quiet.
-        VoiceSpeaker.shared.speak("Se lo paso a Michael.", locale: JarvisTurn.locale)
+        announce("Se lo paso a Michael.")
 
         guard let reply = await JarvisLink.waitForReply(id: id, in: JarvisSettings.replies, timeout: replyTimeout) else {
             log("message: no reply within \(Int(replyTimeout)) s")
             return said("Michael lo tiene, te aviso.")
         }
         log("message: reply read")
+        if typed { return said("Michael dice: \(reply)") }
         let (spoken, cut) = JarvisLink.spokenReply(VoiceQuery.spokenText(reply))
         return said("Michael dice: \(spoken)\(cut ? " El resto está en HQ." : "")")
     }
 
     private static func log(_ message: String) {
         appendAppLog("nb.log", "[Jarvis] \(message)")
+    }
+
+    // MARK: Vault first
+
+    /// `pnpm estado` for the vault's answer: its lines, or nil on any failure (the reports
+    /// still answer; the user asked about them, not about Jarvis's plumbing).
+    private static func estadoText(brand rawBrand: String, question rawQuestion: String) async -> String? {
+        let fabrica = JarvisLink.expand(JarvisSettings.fabricaPath)
+        guard let brand = JarvisLink.cleanBrand(rawBrand), let question = JarvisLink.cleanQuestion(rawQuestion),
+              FileManager.default.fileExists(atPath: fabrica.path), let pnpm = JarvisLink.pnpmExecutable() else { return nil }
+        let outcome = await JarvisLink.runEstado(executable: pnpm,
+                                                 arguments: JarvisLink.estadoArguments(brand: brand, question: question),
+                                                 directory: fabrica, timeout: estadoTimeout)
+        if case .answer(let text) = outcome { return text }
+        log("vault: no estado")
+        return nil
+    }
+
+    /// The vault's turn for a message of the voice or, with `typedAnnounce`, of the text chat.
+    /// An order is sent with the user's own words, which no third-party text can have written:
+    /// that is why it needs no check on what Claude read before.
+    static func vaultTurn(_ text: String, awaitingAnswer: Bool,
+                          typedAnnounce: (@MainActor @Sendable (String) -> Void)? = nil) async -> JarvisVault.Turn {
+        let vault = JarvisLink.expand(JarvisSettings.vaultPath)
+        let store = JarvisVaultStore.shared
+        let deps = JarvisVault.Deps(
+            vaultName: vault.lastPathComponent,
+            brands: { await store.brands(vault: vault) },
+            search: { await store.search($0, brand: $1, brands: $2, vault: vault) },
+            estado: { await estadoText(brand: $0, question: $1) },
+            send: { order in
+                let answer = if let typedAnnounce {
+                    await message(order, typed: true, announce: typedAnnounce)
+                } else {
+                    await handle(["action": "message", "text": order], thirdParty: false)
+                }
+                return (answer.spoken, answer.spoken)
+            })
+        let turn = await JarvisVault.turn(text, awaitingAnswer: awaitingAnswer, markdown: typedAnnounce != nil, deps: deps)
+        switch turn {
+        case .pass(miss: true):                 log("vault: nothing, usual turn")
+        case .answered(_, _, fromVault: true):  log("vault: answered")
+        default:                                break
+        }
+        return turn
     }
 
     // MARK: Prompt (Spanish)
