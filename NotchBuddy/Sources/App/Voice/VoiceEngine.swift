@@ -68,8 +68,7 @@ final class VoiceEngine: ObservableObject {
     private var plan:    VoiceLocalePlan?
     /// Only while Parakeet writes the commands.
     private var commandCapture: VoiceCommandCapture?
-    private var pendingCommands = Set<Int>()
-    private var nextCommandID   = 0
+    private var pendingCommands = PendingCommands()
     private var commandStartedAt = Date.distantPast
     /// Words the wake phrase took in the recognizer's transcript; 0 when listening directly.
     private var wakeWords = 0
@@ -148,15 +147,25 @@ final class VoiceEngine: ObservableObject {
 
     private func handleEnabledChanged() {
         if isEnabled && !isPaused { startAudioPipeline() }
-        else                      { stopAudioPipeline() }
+        else {
+            pendingCommands.dropAll()
+            stopAudioPipeline()
+        }
     }
 
     private func updatePause() {
-        if isPaused { stopAudioPipeline() }
-        else if isEnabled { startAudioPipeline() }
+        if isPaused {
+            pendingCommands.dropAll()
+            stopAudioPipeline()
+        } else if isEnabled { startAudioPipeline() }
     }
 
-    func cancelListening() { endCommand(postFinished: false) }
+    /// Also drops a command still waiting for Parakeet. Not in endCommand: a pipeline rebuild
+    /// goes through it, and a rebuild must not lose the command.
+    func cancelListening() {
+        pendingCommands.dropAll()
+        endCommand(postFinished: false)
+    }
 
     /// Settings → Voice language changed: restart recognition in the new language.
     func reloadLanguage() {
@@ -194,6 +203,7 @@ final class VoiceEngine: ObservableObject {
         isInConversation = false
         conversationTurnWork?.cancel()
         conversationTurnWork = nil
+        pendingCommands.dropAll()
         endCommand(postFinished: false)
     }
 
@@ -721,12 +731,10 @@ final class VoiceEngine: ObservableObject {
             let trimmed = command.trimmingCharacters(in: .whitespaces)
             let normTrimmed = WakePhrase.normalise(trimmed)
             if Self.cancelPhrases.contains(normTrimmed) {
-                commandCapture?.spoil()
-                endCommand(postFinished: true)
+                endCommand(postFinished: true, stopPhrase: true)
             } else if isInConversation && TurnEndPolicy.conversationEndPhrases.contains(normTrimmed) {
                 // Post voiceFinished with the end phrase so IslandWindowController can handle cleanup
-                commandCapture?.spoil()
-                endCommand(postFinished: true)
+                endCommand(postFinished: true, stopPhrase: true)
             }
         }
     }
@@ -766,7 +774,7 @@ final class VoiceEngine: ObservableObject {
     /// Idempotent: if not in command mode, only cancels timers.
     /// Does NOT call endWindow() or resetVAD() — prevents closing a freshly
     /// opened wake window when the result view is dismissed.
-    private func endCommand(postFinished: Bool) {
+    private func endCommand(postFinished: Bool, stopPhrase: Bool = false) {
         silenceWork?.cancel();    silenceWork    = nil
         commandMaxWork?.cancel(); commandMaxWork = nil
         guard isListeningForCommand else { return }
@@ -785,10 +793,12 @@ final class VoiceEngine: ObservableObject {
         let samples = commandCapture?.take()
         if postFinished {
             let cmd = commandTranscript
-            if let samples, !cmd.isEmpty || spoke {
-                writeWithParakeet(samples, recognizerWords: cmd, wakeWords: wakeWords)
+            let wakeOnly = plan?.wakeOnlyFor != nil
+            if let samples, !stopPhrase, !cmd.isEmpty || spoke {
+                writeWithParakeet(samples, recognizerWords: cmd, wakeOnly: wakeOnly, wakeWords: wakeWords)
             } else {
-                postCommand(cmd)
+                deliver(VoiceCommandText.outcome(parakeet: "", recognizer: cmd, wakeOnly: wakeOnly,
+                                                 stopPhrase: stopPhrase, coucou: VoiceSettings.coucouWake))
             }
         }
     }
@@ -798,17 +808,38 @@ final class VoiceEngine: ObservableObject {
                                         object: cmd.isEmpty ? nil : cmd as NSString)
     }
 
-    /// The turn goes on when Parakeet is done, or with the recognizer's words if it fails or
-    /// takes too long: a command is never lost to it.
-    private func writeWithParakeet(_ samples: [Float], recognizerWords: String, wakeWords: Int) {
-        nextCommandID += 1
-        let id = nextCommandID
-        pendingCommands.insert(id)
+    private func deliver(_ outcome: VoiceCommandOutcome) {
+        switch outcome {
+        case .command(let cmd):
+            postCommand(cmd)
+        case .unwritten:
+            appendAppLog("nb.log", "[Voice] command not written: the recognizer's words are not run")
+            commandTranscript = ""
+            let text = VoiceCommandText.unwrittenMessage(language: VoiceSettings.language)
+            VoiceCaptionManager.shared.setUserLine("")
+            VoiceCaptionManager.shared.appendResponse(text)
+            if VoiceSettings.speakEnabled {
+                VoiceSpeaker.shared.onDidFinish = nil
+                VoiceSpeaker.shared.speak(text, locale: VoiceSettings.answerLocale)
+            }
+            postCommand("")
+        }
+    }
+
+    /// The turn goes on when Parakeet is done or has failed or taken too long. What runs then
+    /// is VoiceCommandText.outcome's call.
+    private func writeWithParakeet(_ samples: [Float], recognizerWords: String, wakeOnly: Bool, wakeWords: Int) {
+        let id = pendingCommands.add()
+        let coucou = VoiceSettings.coucouWake
+        func outcome(_ heard: String?) -> VoiceCommandOutcome {
+            VoiceCommandText.outcome(parakeet: heard, recognizer: recognizerWords, wakeOnly: wakeOnly,
+                                     wakeWords: wakeWords, coucou: coucou)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.parakeetCommandTimeout) { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, self.pendingCommands.remove(id) != nil else { return }
-                appendAppLog("nb.log", "[Voice] Parakeet too slow, keeping the recognizer's words")
-                self.postCommand(recognizerWords)
+                guard let self, self.pendingCommands.finish(id) else { return }
+                appendAppLog("nb.log", "[Voice] Parakeet too slow")
+                self.deliver(outcome(nil))
             }
         }
         Task { @MainActor [weak self] in
@@ -818,11 +849,10 @@ final class VoiceEngine: ObservableObject {
             } catch {
                 appendAppLog("nb.log", "[Voice] Parakeet failed: \(error.localizedDescription)")
             }
-            guard let self, self.pendingCommands.remove(id) != nil else { return }
+            guard let self, self.pendingCommands.finish(id) else { return }
             let words = heard?.split(separator: " ").count ?? 0
             appendAppLog("nb.log", "[Voice] Parakeet command: \(samples.count / 16_000) s, \(words) words")
-            self.postCommand(VoiceCommandText.pick(parakeet: heard, recognizer: recognizerWords,
-                                                   wakeWords: wakeWords, coucou: VoiceSettings.coucouWake))
+            self.deliver(outcome(heard))
         }
     }
 

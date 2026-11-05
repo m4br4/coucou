@@ -269,6 +269,53 @@ enum VoiceAudioTests {
             check("Coucou comes off when it is on", pick("ok coucou abre Spotify", coucou: true) == "abre Spotify")
         }
 
+        // MARK: 6b. What a finished turn runs
+        do {
+            let english = "open spot if I"
+            func outcome(_ parakeet: String?, recognizer: String = english, wakeOnly: Bool = true,
+                         stopPhrase: Bool = false, wakeWords: Int = 0) -> VoiceCommandOutcome {
+                VoiceCommandText.outcome(parakeet: parakeet, recognizer: recognizer, wakeOnly: wakeOnly,
+                                         stopPhrase: stopPhrase, wakeWords: wakeWords, coucou: false)
+            }
+            check("wake only: Parakeet's words run", outcome("abre Spotify") == .command("abre Spotify"))
+            check("wake only: the wake phrase comes off",
+                  outcome("O Harvis, abre Spotify", wakeWords: 2) == .command("abre Spotify"))
+            check("wake only: failure or timeout never runs the recognizer", outcome(nil) == .unwritten)
+            check("wake only: spoke, Parakeet failed, recognizer silent is still said", outcome(nil, recognizer: "") == .unwritten)
+            check("wake only: Parakeet wrote nothing", outcome("") == .unwritten)
+            check("wake only: only the wake word", outcome("Jarvis.") == .unwritten)
+            check("wake only: only a misheard wake word", outcome("Harvis.", wakeWords: 1) == .unwritten)
+            check("wake only: nobody heard words", outcome("", recognizer: "") == .command(""))
+            check("wake only: the wake word alone, then silence", outcome("Jarvis", recognizer: "") == .command(""))
+            check("wake only: cancelling still works", outcome("", recognizer: "cancel", stopPhrase: true) == .command("cancel"))
+            check("wake only: a stop word beats Parakeet", outcome("abre Spotify", recognizer: "cancel", stopPhrase: true) == .command("cancel"))
+            check("same language: failure keeps the recognizer", outcome(nil, wakeOnly: false) == .command(english))
+            check("same language: empty keeps the recognizer", outcome("", wakeOnly: false) == .command(english))
+            check("same language: Parakeet's words run", outcome("abre Spotify", wakeOnly: false) == .command("abre Spotify"))
+            check("same language: silence", outcome(nil, recognizer: "", wakeOnly: false) == .command(""))
+
+            check("unwritten in Spanish", VoiceCommandText.unwrittenMessage(language: "es") == "No pude escribir el comando. Repítelo.")
+            check("unwritten in French", VoiceCommandText.unwrittenMessage(language: "fr").hasPrefix("Je n'ai pas pu"))
+            check("unwritten falls back to English", VoiceCommandText.unwrittenMessage(language: "en").hasPrefix("I couldn't"))
+        }
+
+        // MARK: 6c. Turns waiting for Parakeet
+        do {
+            var pending = PendingCommands()
+            let first = pending.add()
+            check("the first answer finishes the turn", pending.finish(first))
+            check("the timeout after it does nothing", !pending.finish(first))
+            let second = pending.add()
+            let third = pending.add()
+            check("turns are told apart", second != third)
+            pending.dropAll()
+            check("a dropped turn gets no answer", !pending.finish(second))
+            check("a dropped turn gets no timeout", !pending.finish(third))
+            let fourth = pending.add()
+            check("an id is never reused", fourth != first && fourth != second && fourth != third)
+            check("a new turn after a drop works", pending.finish(fourth))
+        }
+
         // MARK: 7. Command audio
         do {
             let mono16k = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!

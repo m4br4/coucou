@@ -37,7 +37,7 @@ final class VoiceCommandCapture: Sendable {
         }
     }
 
-    /// This window can't go to Parakeet (it holds Coucou's own voice, or it was a cancel word).
+    /// This window can't go to Parakeet: it holds Coucou's own voice.
     func spoil() { state.withLock { $0.spoiled = true } }
 
     /// The window's audio, once. nil when spoiled or empty.

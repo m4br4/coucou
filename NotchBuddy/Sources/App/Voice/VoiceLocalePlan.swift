@@ -51,6 +51,31 @@ struct VoiceLocalePlan: Equatable, Sendable {
 
 // MARK: - VoiceCommandText
 
+/// What a finished turn hands over.
+enum VoiceCommandOutcome: Equatable {
+    /// The command, or "" for a turn without words.
+    case command(String)
+    /// Words were spoken but nothing trustworthy wrote them: nothing may run.
+    case unwritten
+}
+
+/// The turns waiting for Parakeet. The first of its answer or the timeout finishes one; a
+/// dropped turn is finished by neither.
+struct PendingCommands {
+    private var ids = Set<Int>()
+    private var last = 0
+
+    mutating func add() -> Int {
+        last += 1
+        ids.insert(last)
+        return last
+    }
+
+    mutating func finish(_ id: Int) -> Bool { ids.remove(id) != nil }
+
+    mutating func dropAll() { ids.removeAll() }
+}
+
 enum VoiceCommandText {
     /// How many words of the recognizer's transcript the wake phrase took, what came before it
     /// included: where to look for it in Parakeet's words.
@@ -68,6 +93,25 @@ enum VoiceCommandText {
         let split = WakePhrase.split(heard, coucou: coucou)
         let command = split.matched ? split.command : withoutMisheardWake(heard, wakeWords: wakeWords)
         return command.isEmpty ? recognizer : command
+    }
+
+    /// What the turn runs. `parakeet`: nil when it failed or took too long, "" when it wrote
+    /// nothing or never got the audio. `wakeOnly`: the recognizer is in another language, so
+    /// its words are noise and never run. `stopPhrase`: the recognizer heard a word that ends
+    /// the turn; it acts on nothing, so it counts even then.
+    static func outcome(parakeet: String?, recognizer: String, wakeOnly: Bool, stopPhrase: Bool = false,
+                        wakeWords: Int = 0, coucou: Bool) -> VoiceCommandOutcome {
+        if stopPhrase { return .command(recognizer) }
+        let written = pick(parakeet: parakeet, recognizer: "", wakeWords: wakeWords, coucou: coucou)
+        if !written.isEmpty { return .command(written) }
+        guard wakeOnly else { return .command(recognizer) }
+        return parakeet != nil && recognizer.isEmpty ? .command("") : .unwritten
+    }
+
+    /// Said and shown for `.unwritten`, in the answer language.
+    static func unwrittenMessage(language: String) -> String {
+        ["fr": "Je n'ai pas pu écrire ta commande. Répète-la.",
+         "es": "No pude escribir el comando. Repítelo."][language] ?? "I couldn't write that command. Say it again."
     }
 
     /// Parakeet has no «Jarvis» in its vocabulary and writes things like "O Harvis, abre…".
