@@ -357,6 +357,95 @@ enum VoiceAudioTests {
             check("the cap keeps the newest audio", kept?.suffix(2) == [2, 3])
         }
 
+        // MARK: 8. Speech speed
+        do {
+            typealias S = VoiceSpeech
+            check("the default is 0.85", S.defaultRate == 0.85)
+            check("the range is 0.6 to 1.2", S.rateRange == 0.6...1.2)
+            check("never saved gives the default", S.rate(stored: 0) == 0.85)
+            check("a saved value stays", S.rate(stored: 1.1) == 1.1)
+            check("too slow is clamped", S.rate(stored: 0.2) == 0.6)
+            check("too fast is clamped", S.rate(stored: 3) == 1.2)
+            let base = AVSpeechUtteranceDefaultSpeechRate
+            check("applied to the system's default rate", S.utteranceRate(multiplier: 0.85, base: base) == base * 0.85)
+            check("1× is the system's rate", S.utteranceRate(multiplier: 1, base: base) == base)
+            check("the extremes stay inside what AVSpeech takes",
+                  S.utteranceRate(multiplier: 0.6, base: base) >= AVSpeechUtteranceMinimumSpeechRate
+                      && S.utteranceRate(multiplier: 1.2, base: base) <= AVSpeechUtteranceMaximumSpeechRate)
+        }
+
+        // MARK: 9. Pauses
+        do {
+            typealias S = VoiceSpeech
+            func texts(_ text: String) -> [String] { S.chunks(text).map(\.text) }
+            check("one sentence stays whole", S.chunks("Abrí Spotify") == [.init(text: "Abrí Spotify", pause: 0)])
+            check("sentences are cut",
+                  S.chunks("Listo. Ya lo abrí.") == [.init(text: "Listo.", pause: S.sentencePause),
+                                                     .init(text: "Ya lo abrí.", pause: S.sentencePause)])
+            check("a long comma gets the short pause",
+                  S.chunks("Revisé las ventas de hoy, y todo va muy bien") ==
+                      [.init(text: "Revisé las ventas de hoy,", pause: S.commaPause),
+                       .init(text: "y todo va muy bien", pause: 0)])
+            check("the comma pause is shorter", S.commaPause < S.sentencePause)
+            check("a short comma stays", texts("Sí, claro que lo hago") == ["Sí, claro que lo hago"])
+            check("a short end stays", texts("Lo hice hoy mismo, claro") == ["Lo hice hoy mismo, claro"])
+            check("a list stays whole", texts("Uno, dos, tres y cuatro") == ["Uno, dos, tres y cuatro"])
+            check("numbers stay whole", texts("Son 1,500 pesos y 3.5 por ciento") == ["Son 1,500 pesos y 3.5 por ciento"])
+            check("hours stay whole", texts("La cita es a las 10:30 hoy") == ["La cita es a las 10:30 hoy"])
+            check("questions and exclamations", texts("¿Qué hago? ¡Listo!") == ["¿Qué hago?", "¡Listo!"])
+            check("ellipsis stays with its sentence", texts("Pues... sí") == ["Pues...", "sí"])
+            check("closing quote stays with its sentence", texts("Dijo «listo.» Y ya") == ["Dijo «listo.»", "Y ya"])
+            check("an abbreviation is no sentence", texts("Llamé al Sr. García hoy") == ["Llamé al Sr. García hoy"])
+            check("new lines cut", texts("Uno\nDos") == ["Uno", "Dos"])
+            check("nothing is lost, in order",
+                  texts("Primero esto, luego lo otro también. Y al final, si quieres, aquello.").joined(separator: " ")
+                      == "Primero esto, luego lo otro también. Y al final, si quieres, aquello.")
+            check("blank comes back as it is", S.chunks("  ") == [.init(text: "  ", pause: 0)])
+            check("empty comes back as it is", S.chunks("") == [.init(text: "", pause: 0)])
+        }
+
+        // MARK: 10. Mac voices
+        do {
+            typealias S = VoiceSpeech
+            typealias V = VoiceSpeech.Voice
+            let paulina    = V(id: "e.paulina", name: "Paulina (Enhanced)", language: "es-MX", quality: .enhanced)
+            let paulinaStd = V(id: "c.paulina", name: "Paulina", language: "es-MX", quality: .standard)
+            let monica     = V(id: "e.monica", name: "Mónica", language: "es-ES", quality: .premium)
+            let monicaStd  = V(id: "c.monica", name: "Mónica", language: "es-ES", quality: .standard)
+            let spanish    = V(id: "e.ar", name: "Diego", language: "es-AR", quality: .enhanced)
+            let ava        = V(id: "p.ava", name: "Ava (Premium)", language: "en-US", quality: .premium)
+            let samantha   = V(id: "c.sam", name: "Samantha", language: "en-US", quality: .standard)
+            let thomas     = V(id: "c.tho", name: "Thomas", language: "fr-FR", quality: .standard)
+            let anna       = V(id: "p.anna", name: "Anna", language: "de-DE", quality: .premium)
+            let all = [samantha, thomas, monicaStd, paulinaStd, ava, spanish, monica, paulina, anna]
+
+            check("good voices first, Mexico and Spain ahead",
+                  S.offered(all, answerLanguage: "es") == [paulina, monica, spanish, ava, paulinaStd, monicaStd])
+            check("a Premium doesn't jump over Mexico's Enhanced",
+                  S.offered([ava, paulina], answerLanguage: "es") == [paulina, ava])
+            check("the answer language keeps its standard voices",
+                  S.offered([samantha, paulinaStd], answerLanguage: "en") == [paulinaStd, samantha])
+            check("standard voices of other languages stay out", !S.offered(all, answerLanguage: "es").contains(thomas))
+            check("languages Coucou never speaks stay out", !S.offered(all, answerLanguage: "es").contains(anna))
+            check("same language, Premium before Enhanced",
+                  S.offered([V(id: "a", name: "A", language: "es-MX", quality: .enhanced),
+                             V(id: "b", name: "B", language: "es-MX", quality: .premium)], answerLanguage: "es").first?.id == "b")
+            check("same quality and language: by name",
+                  S.offered([V(id: "b", name: "Z", language: "es-MX", quality: .standard),
+                             V(id: "a", name: "A", language: "es-MX", quality: .standard)], answerLanguage: "es").first?.id == "a")
+
+            check("label with quality", paulina.label == "Paulina · es-MX · Enhanced")
+            check("label of a standard voice", paulinaStd.label == "Paulina · es-MX · Estándar")
+            check("label of a Premium", ava.label == "Ava · en-US · Premium")
+            check("a good voice in the list", S.hasGoodVoice([paulinaStd, paulina]))
+            check("no good voice: the notice shows", !S.hasGoodVoice([paulinaStd, samantha]))
+            check("no voices at all: the notice shows", !S.hasGoodVoice([]))
+
+            check("a voice speaks its region's sibling", S.voice(language: "es-MX", speaks: "es-ES"))
+            check("underscores count", S.voice(language: "es-MX", speaks: "es_MX"))
+            check("a voice doesn't speak another language", !S.voice(language: "es-MX", speaks: "fr-FR"))
+        }
+
         print("\(total - failures)/\(total) tests passed.")
         exit(failures == 0 ? 0 : 1)
     }

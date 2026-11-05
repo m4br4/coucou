@@ -91,6 +91,14 @@ enum VoiceSettings {
         return v == 0 ? fallback : min(1.6, max(0.8, v))
     }
 
+    /// Mac voice speed, a multiplier of the system's default rate (Settings → Voice).
+    static let speechRateKey = "voiceSpeechRate"
+    static var speechRate: Double { VoiceSpeech.rate(stored: UserDefaults.standard.double(forKey: speechRateKey)) }
+
+    /// Identifier of the Mac voice picked in Settings → Voice. "": the best one per language.
+    static let macVoiceKey = "voiceMacVoice"
+    static var macVoice: String { UserDefaults.standard.string(forKey: macVoiceKey) ?? "" }
+
     /// Claude is Coucou's brain (the user's Anthropic API key): what I say after
     /// "OK Coucou" goes to Claude, which acts with Coucou's tools and searches the web.
     /// Off by default: my words leave the Mac only once this is turned on.

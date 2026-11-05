@@ -1,6 +1,7 @@
 import SwiftUI
 import ServiceManagement
 import AppKit
+import AVFoundation
 
 struct SettingsView: View {
     @ObservedObject private var state = AppState.shared
@@ -1398,6 +1399,9 @@ struct SettingsView: View {
     @AppStorage("voiceElevenGender")   private var elevenGender: String = "female"
     @AppStorage("voicePitchFemale")    private var pitchFemale: Double = VoiceSettings.defaultPitchFemale
     @AppStorage("voicePitchMale")      private var pitchMale: Double = VoiceSettings.defaultPitchMale
+    @AppStorage(VoiceSettings.speechRateKey) private var speechRate: Double = VoiceSpeech.defaultRate
+    @AppStorage(VoiceSettings.macVoiceKey)   private var macVoice: String = ""
+    @State private var macVoices: [VoiceSpeech.Voice] = []
     @State private var webKeySaved: Bool = !(KeychainStore.shared.get("anthropic-api-key") ?? "").isEmpty
     @State private var elevenKeyDraft: String = ""
     @State private var elevenKeySaved: Bool = KeychainStore.shared.get(ElevenLabsTTS.keyName) != nil
@@ -1562,6 +1566,47 @@ struct SettingsView: View {
                                })
                         .frame(maxWidth: 180)
                     }
+                    HStack(spacing: 8) {
+                        Text(verbatim: "Velocidad")
+                        Slider(value: $speechRate, in: VoiceSpeech.rateRange, step: 0.05,
+                               onEditingChanged: { editing in
+                                   if !editing { speakVoiceSample() }
+                               })
+                        .frame(maxWidth: 180)
+                        Text(verbatim: String(format: "%.2f×", speechRate))
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
+                    }
+                    HStack(spacing: 8) {
+                        Text(verbatim: "Voz del Mac")
+                        Picker(selection: $macVoice) {
+                            Text(verbatim: "Automática").tag("")
+                            ForEach(macVoices) { Text(verbatim: $0.label).tag($0.id) }
+                        } label: {
+                            Text(verbatim: "Voz del Mac")
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 260)
+                        .onChange(of: macVoice) { _, _ in speakVoiceSample() }
+                    }
+                    .onAppear { reloadMacVoices() }
+                    .onReceive(NotificationCenter.default.publisher(for: AVSpeechSynthesizer.availableVoicesDidChangeNotification)) { _ in
+                        reloadMacVoices()
+                    }
+                    if !VoiceSpeech.hasGoodVoice(macVoices) {
+                        Text(verbatim: "No hay voces Enhanced ni Premium instaladas: Accesibilidad → Contenido leído → Voz del sistema → Gestionar voces.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.Accessibility-Settings.extension") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        } label: {
+                            Text(verbatim: "Descargar voces Premium")
+                        }
+                    }
                     let current = VoiceSpeaker.macVoiceName(for: JarvisTurn.locale, gender: elevenGender)
                     Text(String(format: String(localized: "voice.mac-voice-current %@"), current))
                         .font(.system(size: 11))
@@ -1584,6 +1629,10 @@ struct SettingsView: View {
     }
 
     #if !APPSTORE
+    private func reloadMacVoices() {
+        macVoices = VoiceSpeech.offered(VoiceSpeaker.macVoices(), answerLanguage: voiceLanguage)
+    }
+
     private func localModelStatusLabel(_ status: LocalModelStatus) -> String {
         switch status {
         case .available:            return String(localized: "voice.model-available")

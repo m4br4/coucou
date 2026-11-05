@@ -4,7 +4,9 @@ import AVFoundation
 // MARK: - VoiceSpeaker
 //
 // Gives Coucou a voice, sentence by sentence:
-//   • macOS voices (AVSpeechSynthesizer), best installed voice for the language;
+//   • macOS voices (AVSpeechSynthesizer), the voice chosen in Settings or the best installed
+//     one for the language. Text is cut at sentences and long commas (VoiceSpeech.chunks) and
+//     the queue waits a moment between pieces, cancelled like the rest by stop()/speak();
 //   • ElevenLabs (Settings → Voice, the user's own API key), female or male.
 //     Each queued sentence starts downloading right away, so the next one is usually
 //     ready when the previous one ends. Any ElevenLabs failure falls back to the Mac
@@ -19,11 +21,13 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     private(set) var isSpeaking = false
     private var currentUtterance: AVSpeechUtterance? = nil
     private var waitingForAudio = false
+    private var pauseAfterCurrent: TimeInterval = 0
 
     private struct Item {
         let text: String
         let locale: Locale?
         let audio: Task<Data?, Never>?   // ElevenLabs download, started at enqueue time
+        var pause: TimeInterval = 0      // silence after it, if more follows
     }
     private var queue: [Item] = []
     /// Bumped by stop()/speak(): late callbacks from an older utterance are ignored.
@@ -49,10 +53,12 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     /// Adds a sentence to the queue. Starts playing if nothing is playing.
     func enqueue(_ text: String, locale: Locale?) {
         guard VoiceSettings.speakEnabled else { return }
-        let audio: Task<Data?, Never>? = ElevenLabsTTS.isActive
-            ? Task { await ElevenLabsTTS.shared.audio(for: text) }
-            : nil
-        queue.append(Item(text: text, locale: locale, audio: audio))
+        if ElevenLabsTTS.isActive {
+            // ElevenLabs phrases a whole sentence itself.
+            queue.append(Item(text: text, locale: locale, audio: Task { await ElevenLabsTTS.shared.audio(for: text) }))
+        } else {
+            queue += VoiceSpeech.chunks(text).map { Item(text: $0.text, locale: locale, audio: nil, pause: $0.pause) }
+        }
         if !isSpeaking { playNext() }
     }
 
@@ -72,6 +78,7 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         queue.removeAll()
         currentUtterance = nil
         waitingForAudio = false
+        pauseAfterCurrent = 0
         isSpeaking = false
         player?.stop()
         player = nil
@@ -82,6 +89,7 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         guard !queue.isEmpty else { finished(); return }
         let item = queue.removeFirst()
         isSpeaking = true
+        pauseAfterCurrent = item.pause
         guard let audio = item.audio else { speakSystem(item.text, locale: item.locale); return }
         let gen = generation
         waitingForAudio = true
@@ -104,7 +112,7 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         let gender = VoiceSettings.elevenGender
         // Pitch per voice type (Settings → Voice): the male voice a bit higher sounds younger.
         utt.pitchMultiplier = Float(VoiceSettings.pitch(for: gender))
-        utt.rate = AVSpeechUtteranceDefaultSpeechRate * 1.1
+        utt.rate = VoiceSpeech.utteranceRate(multiplier: VoiceSettings.speechRate, base: AVSpeechUtteranceDefaultSpeechRate)
         utt.voice = Self.bestVoice(for: locale, gender: gender)
         currentUtterance = utt
         synth.speak(utt)
@@ -113,7 +121,16 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     private func itemDone() {
         currentUtterance = nil
         player = nil
-        playNext()
+        let pause = pauseAfterCurrent
+        pauseAfterCurrent = 0
+        guard pause > 0, !queue.isEmpty else { playNext(); return }
+        // isSpeaking stays on and the queue is not empty: isBusy holds the mic gate meanwhile.
+        let gen = generation
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(pause))
+            guard gen == self.generation else { return }
+            self.playNext()
+        }
     }
 
     private func finished() {
@@ -133,6 +150,7 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     /// Premium and Siri voices often report no gender: their name tells it instead.
     static func bestVoice(for locale: Locale?, gender: String) -> AVSpeechSynthesisVoice? {
         guard let loc = locale else { return nil }
+        if let chosen = chosenVoice(for: loc) { return chosen }
         // Listing the system voices (150+) for every sentence cost milliseconds between
         // sentences: one lookup per language and voice type, redone when voices change.
         let key = "\(loc.identifier)|\(gender)"
@@ -141,6 +159,29 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         let v = findBestVoice(for: loc, gender: gender)
         voiceCache[key] = .some(v)
         return v
+    }
+
+    /// The voice picked in Settings, if it is still installed and speaks this language.
+    private static func chosenVoice(for locale: Locale) -> AVSpeechSynthesisVoice? {
+        guard !VoiceSettings.macVoice.isEmpty,
+              let v = AVSpeechSynthesisVoice(identifier: VoiceSettings.macVoice),
+              VoiceSpeech.voice(language: v.language, speaks: locale.identifier) else { return nil }
+        return v
+    }
+
+    /// Settings → Voice → Mac voice. Novelty voices and Personal Voice stay out, as in findBestVoice.
+    static func macVoices() -> [VoiceSpeech.Voice] {
+        AVSpeechSynthesisVoice.speechVoices()
+            .filter { !$0.voiceTraits.contains(.isNoveltyVoice) && !$0.voiceTraits.contains(.isPersonalVoice) }
+            .map { VoiceSpeech.Voice(id: $0.identifier, name: $0.name, language: $0.language, quality: quality(of: $0)) }
+    }
+
+    private static func quality(of v: AVSpeechSynthesisVoice) -> VoiceSpeech.Quality {
+        switch v.quality {
+        case .premium:  return .premium
+        case .enhanced: return .enhanced
+        default:        return .standard
+        }
     }
 
     private static var voiceCache: [String: AVSpeechSynthesisVoice?] = [:]
@@ -191,11 +232,8 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     /// "Ava (Premium)" — shown in Settings so it is clear which voice Coucou uses.
     static func macVoiceName(for locale: Locale, gender: String) -> String {
         guard let v = bestVoice(for: locale, gender: gender) else { return "—" }
-        switch v.quality {
-        case .premium:  return "\(v.name) (Premium)"
-        case .enhanced: return "\(v.name) (Enhanced)"
-        default:        return v.name
-        }
+        let voice = VoiceSpeech.Voice(id: v.identifier, name: v.name, language: v.language, quality: quality(of: v))
+        return voice.quality == .standard ? voice.plainName : "\(voice.plainName) (\(voice.quality.label))"
     }
 
     // MARK: - AVSpeechSynthesizerDelegate
