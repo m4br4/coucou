@@ -1524,10 +1524,14 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Picker(String(localized: "voice.tts-engine"), selection: $ttsEngine) {
                     Text(String(localized: "voice.tts-system")).tag("system")
+                    Text(verbatim: "Voz natural (local)").tag("local")
                     Text(verbatim: "ElevenLabs").tag("elevenlabs")
                 }
                 .labelsHidden()   // the box is already titled "Voice"
                 .frame(maxWidth: 260)
+                .onChange(of: ttsEngine) { _, _ in LocalVoice.shared.preload() }
+
+                if ttsEngine == "local" { LocalVoiceRow() }
 
                 if ttsEngine == "elevenlabs" {
                     HStack(spacing: 6) {
@@ -1566,6 +1570,9 @@ struct SettingsView: View {
                                })
                         .frame(maxWidth: 180)
                     }
+                }
+
+                if ttsEngine != "elevenlabs" {
                     HStack(spacing: 8) {
                         Text(verbatim: "Velocidad")
                         Slider(value: $speechRate, in: VoiceSpeech.rateRange, step: 0.05,
@@ -1578,6 +1585,9 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                             .monospacedDigit()
                     }
+                }
+
+                if ttsEngine == "system" {
                     HStack(spacing: 8) {
                         Text(verbatim: "Voz del Mac")
                         Picker(selection: $macVoice) {

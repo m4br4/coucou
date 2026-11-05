@@ -148,6 +148,36 @@ enum VoiceSpeech {
         code(of: language) == code(of: wanted)
     }
 
+    // MARK: Local voices
+
+    /// Kokoro's voices. Its Spanish ones need its Spanish frontend, the English ones its
+    /// English frontend: `language` says which.
+    struct LocalVoice: Equatable, Sendable, Identifiable {
+        let id: String
+        let name: String
+        let language: String
+        let male: Bool
+    }
+
+    static let localVoices: [LocalVoice] = [
+        .init(id: "ef_dora", name: "Dora", language: "es", male: false),
+        .init(id: "em_alex", name: "Alex", language: "es", male: true),
+        .init(id: "af_heart", name: "Heart", language: "en", male: false),
+        .init(id: "am_michael", name: "Michael", language: "en", male: true),
+    ]
+
+    /// The voice picked for this language, else the one of the chosen gender. nil for a language
+    /// Kokoro doesn't speak here: the Mac voice says it.
+    static func localVoice(language: String, chosen: String, gender: String) -> LocalVoice? {
+        let voices = localVoices.filter { $0.language == code(of: language) }
+        return voices.first { $0.id == chosen } ?? voices.first { $0.male == (gender == "male") }
+    }
+
+    /// Kokoro's Spanish is Spain's: «cinco» comes with θ. Latin America says s.
+    static func seseo(_ phonemes: String) -> String {
+        phonemes.replacingOccurrences(of: "θ", with: "s")
+    }
+
     private static func code(of language: String) -> String {
         language.split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map(String.init) ?? language
     }

@@ -279,6 +279,7 @@ final class VoiceEngine: ObservableObject {
         let capture = plan.parakeetCommand ? VoiceCommandCapture() : nil
         commandCapture = capture
         if plan.parakeetCommand { Parakeet.shared.preload() }
+        LocalVoice.shared.preload()
 
         let a = VoiceAudio()
         let s = WakeSpotter()

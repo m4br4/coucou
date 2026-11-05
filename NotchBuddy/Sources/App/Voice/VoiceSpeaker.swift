@@ -7,6 +7,8 @@ import AVFoundation
 //   • macOS voices (AVSpeechSynthesizer), the voice chosen in Settings or the best installed
 //     one for the language. Text is cut at sentences and long commas (VoiceSpeech.chunks) and
 //     the queue waits a moment between pieces, cancelled like the rest by stop()/speak();
+//   • the natural local voice (LocalVoice), made on this Mac: pieces are queued like the Mac
+//     voice's and each starts being made right away, so the next one is usually ready;
 //   • ElevenLabs (Settings → Voice, the user's own API key), female or male.
 //     Each queued sentence starts downloading right away, so the next one is usually
 //     ready when the previous one ends. Any ElevenLabs failure falls back to the Mac
@@ -26,7 +28,7 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     private struct Item {
         let text: String
         let locale: Locale?
-        let audio: Task<Data?, Never>?   // ElevenLabs download, started at enqueue time
+        let audio: Task<Data?, Never>?   // ElevenLabs or local voice, started at enqueue time
         var pause: TimeInterval = 0      // silence after it, if more follows
     }
     private var queue: [Item] = []
@@ -57,7 +59,11 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
             // ElevenLabs phrases a whole sentence itself.
             queue.append(Item(text: text, locale: locale, audio: Task { await ElevenLabsTTS.shared.audio(for: text) }))
         } else {
-            queue += VoiceSpeech.chunks(text).map { Item(text: $0.text, locale: locale, audio: nil, pause: $0.pause) }
+            let local = LocalVoice.shared.voice(for: locale)
+            queue += VoiceSpeech.chunks(text).map { chunk in
+                let audio = local.map { voice in Task { await LocalVoice.shared.audio(for: chunk.text, voice: voice) } }
+                return Item(text: chunk.text, locale: locale, audio: audio, pause: chunk.pause)
+            }
         }
         if !isSpeaking { playNext() }
     }

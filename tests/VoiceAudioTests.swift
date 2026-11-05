@@ -446,6 +446,26 @@ enum VoiceAudioTests {
             check("a voice doesn't speak another language", !S.voice(language: "es-MX", speaks: "fr-FR"))
         }
 
+        // MARK: 11. Local voices
+        do {
+            typealias S = VoiceSpeech
+            func voice(_ language: String, chosen: String = "", gender: String = "female") -> String? {
+                S.localVoice(language: language, chosen: chosen, gender: gender)?.id
+            }
+            check("Spanish, female", voice("es-MX") == "ef_dora")
+            check("Spanish, male", voice("es-ES", gender: "male") == "em_alex")
+            check("English, female", voice("en-US") == "af_heart")
+            check("English, male", voice("en-GB", gender: "male") == "am_michael")
+            check("French stays with the Mac voice", voice("fr-FR") == nil)
+            check("a picked voice beats the gender", voice("es-MX", chosen: "em_alex") == "em_alex")
+            check("a voice of another language is not picked", voice("es-MX", chosen: "af_heart") == "ef_dora")
+            check("an unknown voice is not picked", voice("en-US", chosen: "gone") == "af_heart")
+            check("each language has both genders",
+                  ["es", "en"].allSatisfy { l in Set(S.localVoices.filter { $0.language == l }.map(\.male)).count == 2 })
+            check("seseo", S.seseo("las θˈinko") == "las sˈinko")
+            check("seseo leaves the rest", S.seseo("ˈola") == "ˈola")
+        }
+
         print("\(total - failures)/\(total) tests passed.")
         exit(failures == 0 ? 0 : 1)
     }
