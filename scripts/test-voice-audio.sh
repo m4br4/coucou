@@ -6,6 +6,7 @@ TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/coucou-voice-audio.XXXXXX")"
 trap 'rm -rf "$TEST_DIR"' EXIT
 swiftc \
     NotchBuddy/Sources/App/Voice/EnergyVAD.swift \
+    NotchBuddy/Sources/App/Voice/EnglishPractice.swift \
     NotchBuddy/Sources/App/Voice/SpotterGeneration.swift \
     NotchBuddy/Sources/App/Voice/VoiceAudio.swift \
     NotchBuddy/Sources/App/Voice/VoiceCommandCapture.swift \

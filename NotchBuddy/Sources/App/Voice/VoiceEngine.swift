@@ -259,6 +259,11 @@ final class VoiceEngine: ObservableObject {
     /// recognizer only hears the wake word in another language.
     var speechLocale: Locale? { plan?.isWakeOnly == false ? locale : nil }
 
+    /// Parakeet writes English whatever the recognizer is; alone, the recognizer has to be English.
+    var canHearEnglish: Bool {
+        plan?.parakeetCommand == true || plan?.locale.hasPrefix("en") == true
+    }
+
     // MARK: - Pipeline lifecycle
 
     private func startAudioPipeline() {

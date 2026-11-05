@@ -1400,6 +1400,7 @@ struct SettingsView: View {
     @AppStorage("voicePitchFemale")    private var pitchFemale: Double = VoiceSettings.defaultPitchFemale
     @AppStorage("voicePitchMale")      private var pitchMale: Double = VoiceSettings.defaultPitchMale
     @AppStorage(VoiceSettings.speechRateKey) private var speechRate: Double = VoiceSpeech.defaultRate
+    @AppStorage(EnglishPractice.levelKey)    private var practiceLevel: String = EnglishPractice.Level.basic.rawValue
     @AppStorage(VoiceSettings.macVoiceEsKey)   private var macVoiceEs: String = ""
     @AppStorage(VoiceSettings.macVoiceEnKey)   private var macVoiceEn: String = ""
     @AppStorage(VoiceSettings.localVoiceEsKey) private var localVoiceEs: String = ""
@@ -1519,6 +1520,22 @@ struct SettingsView: View {
                         ElevenLabsTTS.shared.reset()
                     }
                 }
+                HStack(spacing: 10) {
+                    Text(verbatim: "Práctica de inglés")
+                        .frame(width: 130, alignment: .leading)
+                    Picker(selection: $practiceLevel) {
+                        ForEach(EnglishPractice.Level.allCases) { Text(verbatim: $0.label).tag($0.rawValue) }
+                    } label: {
+                        Text(verbatim: "Práctica de inglés")
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 180)
+                }
+                Text(verbatim: "Di «Jarvis, practiquemos inglés» para conversar en inglés con una corrección breve en cada turno. Di «ya» o «volvamos al español» para salir. Usa tu API key de Anthropic.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(6)
         }

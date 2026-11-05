@@ -41,6 +41,7 @@ enum VoiceSettings {
         set { UserDefaults.standard.set(newValue, forKey: "voiceLanguage") }
     }
     static var answerLocale: Locale {
+        if EnglishPractice.isActive { return Locale(identifier: "en-US") }
         if JarvisTurn.isActive { return JarvisTurn.locale }   // "Jarvis, …" answers in Spanish
         switch language {
         case "fr": return Locale(identifier: "fr-FR")

@@ -1487,6 +1487,24 @@ extension IslandWindowController {
         // Answers in the answer language, whatever language I spoke.
         runner.commandLocale = VoiceSettings.answerLocale
 
+        // ── English practice: before anything else, "stop" and "thanks" are just English there ──
+        switch EnglishPractice.command(for: transcript, active: EnglishPractice.isActive) {
+        case .start:
+            VoiceCaptionManager.shared.setUserLine(transcript)
+            startEnglishPractice()
+            return
+        case .stop:
+            VoiceCaptionManager.shared.setUserLine(transcript)
+            EnglishPracticeSession.shared.end()
+            sayAndContinue(EnglishPractice.closing, keepListening: false)
+            return
+        case .none:
+            if EnglishPractice.isActive {
+                await englishPracticeTurn(transcript)
+                return
+            }
+        }
+
         // ── Conversation end phrase ────────────────────────────────────────────────
         let normTranscript = WakePhrase.normalise(transcript)
         if isInConversation && TurnEndPolicy.conversationEndPhrases.contains(normTranscript) {
@@ -1873,6 +1891,43 @@ extension IslandWindowController {
         }
     }
 
+    /// Needs Claude (words only leave the Mac with the user's key) and a way to hear English.
+    @MainActor
+    private func startEnglishPractice() {
+        guard ClaudeVoiceBrain.isActive else { sayAndContinue(EnglishPractice.needsKey, keepListening: false); return }
+        guard VoiceEngine.shared.canHearEnglish else {
+            sayAndContinue(EnglishPractice.needsParakeet, keepListening: false)
+            return
+        }
+        EnglishPracticeSession.shared.begin()
+        sayAndContinue(EnglishPractice.opening, keepListening: true)
+    }
+
+    @MainActor
+    private func englishPracticeTurn(_ transcript: String) async {
+        VoiceCaptionManager.shared.setUserLine(transcript)
+        // A stale "finished speaking" handler must not reopen the mic during the wait.
+        VoiceSpeaker.shared.onDidFinish = nil
+        AppState.shared.voiceSubState = .thinking
+        if let reply = await EnglishPracticeSession.shared.respond(to: transcript) {
+            VoiceTranscriptHistory.shared.record(transcript: transcript, note: reply, origin: .brain)
+            sayAndContinue(reply, keepListening: true)
+        } else if EnglishPractice.isActive {
+            let sorry = EnglishPractice.unreachable
+            sayAndContinue(sorry, keepListening: false)
+            EnglishPracticeSession.shared.end()
+        }
+    }
+
+    /// `keepListening`: the practice goes on, whatever the text ends with.
+    @MainActor
+    private func sayAndContinue(_ text: String, keepListening: Bool) {
+        VoiceCaptionManager.shared.appendResponse(text)
+        let result = VoiceActionResult(outcome: keepListening ? .question(text: text) : .success, message: text)
+        AppState.shared.voiceResult = result
+        speakAndContinueConversation(result)
+    }
+
     /// One turn with Claude: caption, spoken answer, and a re-listen when Claude asked
     /// something (its answer ends with "?"). False when Claude couldn't be reached.
     @MainActor
@@ -1970,6 +2025,7 @@ extension IslandWindowController {
                 self?.conversationContext.reset()
                 VoiceActionRunner.shared.resetWebThread()
                 ClaudeVoiceBrain.shared.reset()
+                EnglishPracticeSession.shared.end()
                 VoiceBrain.shared.endConversation()
             }
         }

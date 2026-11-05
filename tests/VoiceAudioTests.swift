@@ -498,6 +498,55 @@ enum VoiceAudioTests {
             check("seseo leaves the rest", S.seseo("ˈola") == "ˈola")
         }
 
+        // MARK: 12. English practice
+        do {
+            typealias E = EnglishPractice
+            func off(_ text: String) -> E.Command { E.command(for: text, active: false) }
+            func on(_ text: String) -> E.Command { E.command(for: text, active: true) }
+            check("the phrase starts it", off("practiquemos inglés") == .start)
+            check("with accents, capitals and a period", off("Practiquemos Inglés.") == .start)
+            check("without the accent, as dictation may write it", off("practiquemos ingles") == .start)
+            check("inside a sentence", off("oye, vamos a practicar inglés un rato") == .start)
+            check("Parakeet may write it in English", off("let's practice English") == .start)
+            check("another command doesn't start it", off("abre Spotify") == .none)
+            check("just the language doesn't start it", off("¿cómo se dice perro en inglés?") == .none)
+            check("«ya» means nothing outside of practice", off("ya") == .none)
+            check("leaving means nothing outside of practice", off("volvamos al español") == .none)
+            check("«ya» leaves", on("ya") == .stop)
+            check("«Ya.» leaves", on("Ya.") == .stop)
+            check("«volvamos al español» leaves", on("Volvamos al español.") == .stop)
+            check("inside a sentence too", on("creo que ya, volvamos al español") == .stop)
+            check("«ya» inside a sentence stays practice", on("ya comí hoy") == .none)
+            check("English goes on", on("I went to the market yesterday") == .none)
+            check("«stop» is just English here", on("stop") == .none)
+            check("asking again doesn't restart it", on("practiquemos inglés") == .none)
+
+            for level in E.Level.allCases {
+                let prompt = E.systemPrompt(level: level)
+                check("\(level.rawValue): ends with a correction", prompt.contains("Correction:"))
+                check("\(level.rawValue): not about pronunciation", prompt.contains("never comment on pronunciation"))
+                check("\(level.rawValue): grammar and vocabulary", prompt.contains("grammar or vocabulary"))
+                check("\(level.rawValue): no tools", prompt.contains("You can only talk"))
+                check("\(level.rawValue): for reading aloud", prompt.contains("read aloud"))
+            }
+            check("levels differ", E.systemPrompt(level: .basic) != E.systemPrompt(level: .intermediate))
+            check("basic is for beginners", E.systemPrompt(level: .basic).contains("beginner"))
+            check("intermediate is intermediate", E.systemPrompt(level: .intermediate).contains("intermediate"))
+
+            check("off by default", !E.isActive)
+            E.set(true)
+            check("set on", E.isActive)
+            E.set(false)
+            check("set off", !E.isActive)
+            UserDefaults.standard.removeObject(forKey: E.levelKey)
+            check("basic by default", E.level == .basic)
+            UserDefaults.standard.set("intermediate", forKey: E.levelKey)
+            check("the saved level", E.level == .intermediate)
+            UserDefaults.standard.set("expert", forKey: E.levelKey)
+            check("an unknown level is basic", E.level == .basic)
+            UserDefaults.standard.removeObject(forKey: E.levelKey)
+        }
+
         print("\(total - failures)/\(total) tests passed.")
         exit(failures == 0 ? 0 : 1)
     }
