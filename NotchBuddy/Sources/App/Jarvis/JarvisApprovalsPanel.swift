@@ -49,8 +49,11 @@ final class JarvisApprovalStore: ObservableObject {
 
     var isHoldingCard: Bool { requested != nil }
 
-    /// Touch ID, the Apple Watch or the Mac's password.
-    var confirmOwner: @Sendable (String) async -> Bool = { await JarvisApprovalStore.ownerConfirms(reason: $0) }
+    #if JARVIS_STORE_TESTS
+    /// Stands in for Touch ID in scripts/test-jarvis-store.sh, the only build with this flag:
+    /// the app has nothing to replace.
+    var confirmOwner: @Sendable (String) async -> Bool = { _ in false }
+    #endif
 
     var vault: URL { JarvisLink.expand(JarvisSettings.vaultPath) }
     var current: JarvisApprovals.Report? { missing ?? (pending.indices.contains(index) ? pending[index] : pending.first) }
@@ -300,7 +303,13 @@ final class JarvisApprovalStore: ObservableObject {
         defer { busy = false }
         let report = seen
         let code = JarvisApprovals.shortCode(report.huella)
-        guard await confirmOwner("aprobar \(report.id) de Jarvis, código \(code)") else {
+        let reason = "aprobar \(report.id) de Jarvis, código \(code)"
+        #if JARVIS_STORE_TESTS
+        let confirmed = await confirmOwner(reason)
+        #else
+        let confirmed = await Self.ownerConfirms(reason: reason)
+        #endif
+        guard confirmed else {
             status = "Sin Touch ID o contraseña no se aprueba nada."
             return
         }
