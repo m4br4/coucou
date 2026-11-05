@@ -1,4 +1,5 @@
 #if !APPSTORE
+import CryptoKit
 import Foundation
 
 // MARK: - JarvisApprovals
@@ -6,8 +7,8 @@ import Foundation
 // "Aprobaciones de Jarvis" (this fork): the reports Jarvis's agents leave in
 // vault/informes/ with `estado: esperando-aprobacion`, approved or rejected from the
 // notch. Coucou is Abraham's own process, not an agent session: it may write in
-// vault/aprobaciones/, the agents may not. Pure Foundation, no AppKit: compiled into the
-// app and into tests/JarvisApprovalsTests.swift.
+// vault/aprobaciones/, the agents may not. No AppKit: compiled into the app and into
+// tests/JarvisApprovalsTests.swift.
 //
 // Same rules as HQ (Jarvis/hq/src/lib/server/approvals.ts): the APROBADO carries the
 // frontmatter of vault/aprobaciones/README.md (tarea, accion, fecha, autorizado_por:
@@ -17,7 +18,8 @@ import Foundation
 enum JarvisApprovals {
     static let defaultVaultPath = "~/Code/personal/Jarvis/vault"
     static let pendingState = "esperando-aprobacion"
-    static let idPattern = #"^[A-Za-z0-9._-]{1,64}$"#
+    /// \z, not $: $ also lets a final line break through.
+    static let idPattern = #"^[A-Za-z0-9._-]{1,64}\z"#
     static let maxPatterns = 20
     static let maxPatternLength = 300
     static let motivoMax = 2000
@@ -28,9 +30,30 @@ enum JarvisApprovals {
         let informe: String     // path relative to the vault's parent (as HQ shows it)
         let permite: [String]   // the report's frontmatter, as is
         let decision: Decision
+        var huella = ""         // see `huella(of:data:)`: any byte changes it
+        /// Latest of the report's creation and modification dates. A hint an agent can fake,
+        /// and no part of what makes two reports equal: touching a file changes nothing.
+        var changedAt = Date.distantPast
 
         /// Approvable as is: one to 20 patterns, none empty, too long or multi-line.
         var permiteIsValid: Bool { JarvisApprovals.permiteProblem(permite) == nil }
+
+        /// Two files can share an id: this is what tells them apart.
+        var key: String { "\(id)\n\(informe)" }
+
+        static func == (a: Report, b: Report) -> Bool {
+            a.id == b.id && a.titulo == b.titulo && a.informe == b.informe && a.permite == b.permite
+                && a.decision == b.decision && a.huella == b.huella
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(id)
+            hasher.combine(titulo)
+            hasher.combine(informe)
+            hasher.combine(permite)
+            hasher.combine(decision)
+            hasher.combine(huella)
+        }
     }
 
     enum Decision: String, Sendable { case pendiente, aprobado, rechazado }
@@ -104,6 +127,14 @@ enum JarvisApprovals {
         s.unicodeScalars.contains { $0.properties.generalCategory == .format }
     }
 
+    /// Approve stays off this long after the card opens or changes, whatever is clicked: a card
+    /// that appears under the pointer must not take a click meant for something else.
+    static let armDelay: TimeInterval = 1.5
+
+    static func isArmed(shownAt: Date, now: Date) -> Bool {
+        now.timeIntervalSince(shownAt) >= armDelay
+    }
+
     /// Approve stays off until every pattern was on screen: the list fits in its box, or it
     /// was scrolled to the end.
     static func canApprove(contentFits: Bool, reachedEnd: Bool) -> Bool {
@@ -133,6 +164,92 @@ enum JarvisApprovals {
         return out
     }
 
+    // MARK: Huella
+
+    struct RegularFile {
+        let data: Data
+        let created: Date
+        let modified: Date
+    }
+
+    /// The whole file from one open: a symlink, a folder or a pipe is nil. What is parsed, what
+    /// is hashed and the dates all come from this same read.
+    static func readRegular(_ url: URL) -> RegularFile? {
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var st = stat()
+        guard fstat(fd, &st) == 0, st.st_mode & S_IFMT == S_IFREG else { return nil }
+        var data = Data()
+        var chunk = [UInt8](repeating: 0, count: 65_536)
+        while true {
+            let n = read(fd, &chunk, chunk.count)
+            if n < 0, errno == EINTR { continue }
+            guard n >= 0 else { return nil }
+            if n == 0 { break }
+            data.append(contentsOf: chunk[..<n])
+        }
+        func date(_ t: timespec) -> Date { Date(timeIntervalSince1970: TimeInterval(t.tv_sec) + TimeInterval(t.tv_nsec) / 1e9) }
+        return RegularFile(data: data, created: date(st.st_birthtimespec), modified: date(st.st_mtimespec))
+    }
+
+    static let huellaSiblings = ["resumen-gratis.md", "informe-completo.md"]
+
+    /// HQ's calcularHuella: sha256, in lowercase hex, of name · 0x00 · size · 0x00 · bytes for the
+    /// report and then each sibling «Ver» shows. `data` is the report as it was read and parsed.
+    static func huella(of report: URL, data: Data) -> String {
+        var hash = SHA256()
+        func add(_ name: String, _ bytes: Data) {
+            hash.update(data: Data(name.utf8))
+            hash.update(data: Data([0]))
+            hash.update(data: Data(String(bytes.count).utf8))
+            hash.update(data: Data([0]))
+            hash.update(data: bytes)
+        }
+        let name = diskName(of: report)
+        add(name, data)
+        let folder = report.deletingLastPathComponent()
+        for sibling in huellaSiblings where sibling != name {
+            if let file = readRegular(folder.appendingPathComponent(sibling)) { add(sibling, file.data) }
+        }
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The name with the bytes it has on disk, as HQ reads it. URL hands back «ñ» decomposed
+    /// whatever is stored, and Swift's == can't tell the two apart: only the utf8 differs.
+    private static func diskName(of url: URL) -> String {
+        let name = url.lastPathComponent
+        guard !name.utf8.allSatisfy({ $0 < 0x80 }), let dir = opendir(url.deletingLastPathComponent().path) else { return name }
+        defer { closedir(dir) }
+        while let entry = readdir(dir) {
+            let found = withUnsafeBytes(of: &entry.pointee.d_name) { String(cString: $0.bindMemory(to: CChar.self).baseAddress!) }
+            if found == name { return found }
+        }
+        return name
+    }
+
+    /// What Abraham compares by eye between HQ, the card and Touch ID: 1c9d-662b-73a4. A help,
+    /// not a guarantee: the app always compares the 64 characters.
+    static func shortCode(_ huella: String) -> String {
+        let head = Array(huella.prefix(12))
+        return stride(from: 0, to: head.count, by: 4)
+            .map { String(head[$0..<min($0 + 4, head.count)]) }
+            .joined(separator: "-")
+    }
+
+    /// «informe de hace 40 s», as HQ says it.
+    static func ageText(since date: Date, now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        let amount: String
+        switch seconds {
+        case ..<60:     amount = "\(seconds) s"
+        case ..<3600:   amount = "\(seconds / 60) min"
+        case ..<86_400: amount = "\(seconds / 3600) h"
+        default:        amount = "\(seconds / 86_400) d"
+        }
+        return "informe de hace \(amount)"
+    }
+
     static func exists(_ url: URL) -> Bool {
         var st = stat()
         return lstat(url.path, &st) == 0
@@ -151,8 +268,8 @@ enum JarvisApprovals {
         let base = vault.deletingLastPathComponent().resolvingSymlinksInPath().path + "/"
         var out: [(Report, String)] = []
         for file in reportFiles(in: informesDir(vault)) {
-            guard let data = FileManager.default.contents(atPath: file.path) else { continue }
-            let (fm, body) = parseFrontmatter(String(decoding: data, as: UTF8.self))
+            guard let read = readRegular(file) else { continue }
+            let (fm, body) = parseFrontmatter(String(decoding: read.data, as: UTF8.self))
             guard fm["estado"] == pendingState else { continue }
             let name = file.deletingPathExtension().lastPathComponent
             let tarea = fm["tarea"] ?? ""
@@ -163,7 +280,8 @@ enum JarvisApprovals {
             let path = file.resolvingSymlinksInPath().path
             let report = Report(id: id, titulo: heading.flatMap { $0.isEmpty ? nil : $0 } ?? name,
                                 informe: path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path,
-                                permite: parsePermite(fm["permite"]), decision: decision(for: id, vault: vault))
+                                permite: parsePermite(fm["permite"]), decision: decision(for: id, vault: vault),
+                                huella: huella(of: file, data: read.data), changedAt: max(read.created, read.modified))
             out.append((report, fm["fecha"] ?? ""))
         }
         return out.sorted { $0.1 > $1.1 }.map(\.0)
@@ -276,7 +394,7 @@ enum JarvisApprovals {
     static func current(_ shown: Report, vault: URL) throws -> Report {
         guard let now = listPending(vault: vault).first(where: { $0.id == shown.id && $0.informe == shown.informe }),
               now.decision == .pendiente else { throw Failure.notPending }
-        guard now.titulo == shown.titulo, now.permite == shown.permite else { throw Failure.changed }
+        guard now.titulo == shown.titulo, now.permite == shown.permite, now.huella == shown.huella else { throw Failure.changed }
         return now
     }
 

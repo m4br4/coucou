@@ -248,7 +248,7 @@ enum IslandConst {
         // After an update: taller, four items then the stats (like mail, it fills the height)
         .whatsNew:     ViewLayout(height: 232, botX: 62,  botY: nil, botDiameter: 58, agentMode: .none),
         // Jarvis approval: Mochi on the left, the task, the action and its permite patterns
-        .jarvisApprovals: ViewLayout(height: 232, botX: 62, botY: nil, botDiameter: 58, agentMode: .none),
+        .jarvisApprovals: ViewLayout(height: 252, botX: 62, botY: nil, botDiameter: 58, agentMode: .none),
     ]
 
     // Project colors — keyed by lowercase display name or slug

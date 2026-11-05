@@ -37,6 +37,8 @@ final class IslandWindowController: NSWindowController {
     private var hasSpokenPasCompris = false
     #endif
 
+    // A card HQ asked for opens without a sound (JV-13)
+    private var silentNextOpen = false
     // Suppress peek sound on next reveal (e.g. musicReveal)
     var silentNextReveal = false
 
@@ -330,7 +332,7 @@ final class IslandWindowController: NSWindowController {
         #if !APPSTORE
         // A WhatsApp reply being typed holds the island open, like a voice mail draft.
         fsm.isHeldOpen = { AppState.shared.pendingApproval != nil || AppState.shared.voiceMailDraft != nil
-                           || WhatsAppController.shared.composing }
+                           || WhatsAppController.shared.composing || JarvisApprovalStore.shared.isHoldingCard }
         #else
         fsm.isHeldOpen = { AppState.shared.pendingApproval != nil || AppState.shared.voiceMailDraft != nil }
         #endif
@@ -605,7 +607,7 @@ final class IslandWindowController: NSWindowController {
             ? .timingCurve(0.45, 0, 0.2, 1, duration: 0.34)
             : .spring(response: 0.5, dampingFraction: 0.72)
         withAnimation(anim) { state.mode = mode }
-        if mode == .expanded { SoundEngine.shared.play("open") }
+        if mode == .expanded, !silentNextOpen { SoundEngine.shared.play("open") }
         if prev == .expanded {
             SoundEngine.shared.play("close")
             if fsm.isHeldOpen?() != true { state.isPinned = false }
@@ -625,6 +627,10 @@ final class IslandWindowController: NSWindowController {
 
     func collapse(allowPendingApproval: Bool = false) {
         let keepsApprovalPending = allowPendingApproval && state.pendingApproval != nil
+        #if !APPSTORE
+        // Held so it can't fold by itself; Abraham can still close it (Escape, the hotkey).
+        if allowPendingApproval { JarvisApprovalStore.shared.requestedCardClosed() }
+        #endif
         guard fsm.isHeldOpen?() != true || keepsApprovalPending else { return }
         if !keepsApprovalPending { state.isPinned = false }
         finishedPinTimer?.cancel()
@@ -883,6 +889,16 @@ final class IslandWindowController: NSWindowController {
             self.fsm.openedExternally()
             self.expand(to: view)
         }
+
+        #if !APPSTORE
+        NotificationCenter.default.addObserver(forName: .jarvisCardSilently, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.silentNextOpen = true
+            self.fsm.openedExternally()
+            self.expand(to: .jarvisApprovals)
+            self.silentNextOpen = false
+        }
+        #endif
 
         // Hook server compact reveal (non-alert work events: session start, tool use, etc.)
         NotificationCenter.default.addObserver(forName: .hookReveal, object: nil, queue: .main) { [weak self] _ in
@@ -2089,6 +2105,7 @@ extension IslandWindowController {
 
 extension Notification.Name {
     static let triggerEmote     = Notification.Name("notchBuddy.triggerEmote")
+    static let jarvisCardSilently = Notification.Name("notchBuddy.jarvisCardSilently")
     static let triggerSlap      = Notification.Name("notchBuddy.triggerSlap")
     static let botDizzy         = Notification.Name("notchBuddy.botDizzy")
     static let botGreet         = Notification.Name("notchBuddy.botGreet")

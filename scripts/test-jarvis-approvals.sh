@@ -5,5 +5,7 @@ TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/coucou-jarvis-approvals.XXXXXX")"
 trap 'rm -rf "$TEST_DIR"' EXIT
 swiftc -parse-as-library \
     NotchBuddy/Sources/App/Jarvis/JarvisApprovals.swift \
+    NotchBuddy/Sources/App/Jarvis/JarvisApprovalSocket.swift \
+    NotchBuddy/Sources/App/Jarvis/JarvisRequest.swift \
     tests/JarvisApprovalsTests.swift -o "$TEST_DIR/jarvis-approvals-tests"
 "$TEST_DIR/jarvis-approvals-tests"
