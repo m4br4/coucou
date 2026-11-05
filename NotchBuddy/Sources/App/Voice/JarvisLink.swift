@@ -21,6 +21,7 @@ enum JarvisLink {
     static let messageMax  = 4000      // HQ's CHAT_MAX
     static let voiceFrom   = "coucou-voz"
     static let voiceHeader = "Por voz, desde Coucou: sin verificar"
+    static let typedHeader = "Por chat, desde Coucou: sin verificar"
     static let questionMax = 500
     static let replyMax    = 20_000    // HQ's REPLY_MAX
     static let spokenLineMax = 6
@@ -214,14 +215,17 @@ enum JarvisLink {
 
     /// What the voice may say once the header is added, within HQ's limit.
     static var voiceTextMax: Int { messageMax - voiceHeader.utf16.count - 1 }
+    static var typedTextMax: Int { messageMax - typedHeader.utf16.count - 1 }
 
     /// HQ's message, marked as the voice's: from coucou-voz, "VOZ: " subject, and a first
     /// body line saying it is unverified. Same id shape, so the reply goes to hq-replies/.
-    static func buildMessage(text: String, now: Date, id: String) -> HQMessage {
+    /// `typed`: it came from the text chat, and the subject and that first line say so.
+    static func buildMessage(text: String, now: Date, id: String, typed: Bool = false) -> HQMessage {
         let oneLine = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
         return HQMessage(id: id, conversation: "hq-chat", in_reply_to: nil, from: voiceFrom, to: "god",
-                         act: "request", subject: "VOZ: \(oneLine.prefix(60))", body: "\(voiceHeader)\n\(text)", hops: 0,
+                         act: "request", subject: "\(typed ? "CHAT" : "VOZ"): \(oneLine.prefix(60))",
+                         body: "\(typed ? typedHeader : voiceHeader)\n\(text)", hops: 0,
                          requires_reply: true, needs_human: false, created_at: isoString(now))
     }
 
