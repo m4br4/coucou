@@ -40,12 +40,16 @@ enum JarvisVault {
     /// `space-technology` and `spacetechnology`, `Hispano Host` and `hispanohost`: the same.
     static func key(_ text: String) -> String { tokens(text).joined() }
 
-    /// The words that send a message to the vault without a brand: a question about a
-    /// report names it. «seguridad», «redes» or «ventas» alone are everyday words. Stems.
-    static let reportWords: Set<String> = ["auditoria", "informe", "reporte", "inventario"]
-    /// Words about the vault's subjects: not names, and enough to make an order Michael's.
-    static let keywords = reportWords.union(["seguridad", "rede", "estado", "venta"])
-    static let orderKeywords = keywords.subtracting(["estado"])
+    /// The words that send a message to the vault without a brand, after a determiner: a
+    /// question about a report names one. «seguridad», «redes» or «ventas» alone are everyday
+    /// words, and so is «inventario». Stems.
+    static let reportWords: Set<String> = ["auditoria", "informe", "reporte"]
+    static let determiners: Set<String> = [
+        "el", "la", "los", "las", "del", "al", "ese", "esa", "esos", "esas", "este", "esta", "estos", "estas",
+        "aquel", "aquella", "nuestro", "nuestra", "nuestros", "nuestras",
+    ]
+    /// Words about the vault's subjects, which are never names.
+    static let keywords = reportWords.union(["inventario", "seguridad", "rede", "estado", "venta"])
     /// What `pnpm estado` measures. It calls the services, so only these words run it.
     static let metricWords: Set<String> = [
         "alcance", "seguidor", "seguidore", "suscriptor", "suscriptore", "venta", "ingreso", "factura", "facturacion", "anuncio",
@@ -81,8 +85,6 @@ enum JarvisVault {
     /// Verbs that are nouns too: they order only before what they act on.
     static let nounVerbs: Set<String> = ["programa", "agenda"]
     static let articles: Set<String> = ["un", "una", "unos", "unas", "el", "la", "los", "las", "otro", "otra", "mi", "mis"]
-    /// Orders that speak to someone: they need a brand or Michael, or «dile a mi mamá…» counts.
-    static let personVerbs: Set<String> = ["dile", "diles", "decirle", "avisa", "avisale", "avisar", "avisarle"]
     /// «Quiero que me digas…» asks; it doesn't order.
     static let askingVerbs: Set<String> = ["digas", "cuentes", "expliques", "muestres", "ensenes", "pases", "leas", "resumas",
                                            "busques", "veas", "mires", "sepas"]
@@ -102,7 +104,8 @@ enum JarvisVault {
         "nuevas", "ultimo", "ultima", "ultimos", "ultimas", "reciente", "recientes", "algo", "todo", "toda", "todos", "todas",
         "mas", "muy", "tal", "entonces", "pues", "hoy", "ayer", "jarvis", "oye", "hola", "porfa", "favor", "the", "what",
         "how", "of", "is", "and", "semana", "mes", "ano", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
-        "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+        "agosto", "septiembre", "octubre", "noviembre", "diciembre", "pasa", "sabemos", "hablame", "cuentame", "novedad",
+        "novedades", "pendiente", "pendientes",
     ]
 
     /// The stems worth comparing. Stop words go first: "cuales" would stem past the list.
@@ -261,6 +264,15 @@ enum JarvisVault {
         }
     }
 
+    /// «La auditoría», «el último informe»: one report. «Una auditoría» is any of them.
+    static func namesReport(_ words: [String]) -> Bool {
+        words.indices.contains { i in
+            guard i > 0, reportWords.contains(stem(words[i])) else { return false }
+            return determiners.contains(words[i - 1])
+                || (i > 1 && stopWords.contains(words[i - 1]) && determiners.contains(words[i - 2]))
+        }
+    }
+
     /// Whether the message asks. What doesn't ask may be an order this code didn't see, and the
     /// answer then says that nothing went to Michael.
     static func isQuestion(_ text: String) -> Bool {
@@ -285,11 +297,11 @@ enum JarvisVault {
         if let verb = orderVerb(text) {
             let note = verb.hasPrefix("crea") && !said.isDisjoint(with: ["nota"])
             let personal = !michael && (note || !personalWords.isDisjoint(with: words))
-            guard !personal, !personVerbs.contains(verb) || brand != nil || michael else { return .normal }
-            return brand != nil || michael || !orderKeywords.isDisjoint(with: said) ? .order : .normal
+            // An order needs someone it is for: «Haz una copia de seguridad» is Claude's.
+            return !personal && (brand != nil || michael) ? .order : .normal
         }
         if let brand { return .vault(brand) }
-        guard !reportWords.isDisjoint(with: said), !isDefinition(text) else { return .normal }
+        guard namesReport(words), !isDefinition(text) else { return .normal }
         return .vault(nil)
     }
 

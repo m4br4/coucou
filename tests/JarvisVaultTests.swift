@@ -210,9 +210,16 @@ enum JarvisVaultTests {
         // MARK: routing
         check("brand without prefix goes to the vault", isVault(route("¿Cómo va HispanoHost?")))
         check("client goes to the vault", isVault(route("¿qué sabemos de demo cafe?")))
-        for word in ["auditoría", "Auditorias", "informe", "informes", "reporte", "inventario"] {
-            check("word «\(word)» goes to the vault", isVault(route("dime algo de \(word) por favor")))
+        for word in ["auditoría", "Auditorias", "informe", "informes", "reporte"] {
+            check("word «\(word)» goes to the vault", isVault(route("dime algo de la \(word) por favor")))
         }
+        for q in ["¿qué dice nuestra auditoría?", "¿cómo salió esa auditoría?", "¿qué hay del informe?", "¿qué dice el último informe?"] {
+            check("determiner: «\(q)»", isVault(route(q)), "\(route(q))")
+        }
+        check("a noun between them is no determiner", !JarvisVault.namesReport(["la", "empresa", "auditoria"]))
+        check("«inventario» is no name", JarvisVault.nameTerms("el informe de inventario").isEmpty)
+        check("«inventario» alone stays out", route("¿qué dice el inventario?") == .normal)
+        check("with a brand it counts", isVault(route("¿qué dice el inventario de HispanoHost?")))
         check("with the Jarvis prefix too", isVault(route("Jarvis, ¿qué dice el informe?")))
         for q in ["¿cómo van las redes?", "¿revisaron la seguridad?", "¿cómo van las ventas?", "¿cuáles son las ventas?", "¿qué ventas tiene Apple?"] {
             check("the accepted cost: «\(q)» goes to Claude", route(q) == .normal, "\(route(q))")
@@ -224,11 +231,10 @@ enum JarvisVaultTests {
         check("ventas de Stripe stay with service_info", route("¿cuántas ventas hay en Stripe?") == .normal)
         check("estado de GitHub stays with service_info", route("estado de GitHub") == .normal)
         check("estado de Cal.com stays with service_info", route("estado de cal.com") == .normal)
-        check("a service inside a word is no service", isVault(route("informe de calidad cal2")))
         check("brand wins over a service", isVault(route("ventas de HispanoHost en Stripe")))
         for q in ["Haz un informe de HispanoHost", "pídele a Michael el informe de ventas", "Programa un post para Social Space",
-                  "Oye, programa la auditoría de hispanohost", "Jarvis, pídele a redes un copy", "¿Puedes pedirle a Michael que lo mire?",
-                  "¿me puedes hacer un informe?", "quiero que prepares un informe de HispanoHost", "Dile a Michael que estoy"] {
+                  "Oye, programa la auditoría de hispanohost", "¿Puedes pedirle a Michael que lo mire?",
+                  "quiero que prepares un informe de HispanoHost", "Dile a Michael que estoy"] {
             check("order: «\(q)»", route(q) == .order, "\(route(q))")
         }
         // John's reviews, sentence by sentence.
@@ -240,14 +246,26 @@ enum JarvisVaultTests {
                   "¿qué cámaras de seguridad me recomiendas?", "¿qué es la seguridad vial?", "¿qué medidas de seguridad hay en un avión?",
                   "¿cómo se llama el guardia de seguridad?", "¿qué es la seguridad informática?", "¿cómo funcionan las redes wifi?",
                   "¿cómo conecto dos redes?", "¿qué es una auditoría?", "¿qué es una auditoría externa?",
-                  "¿cómo se hace una auditoría interna?", "¿qué es un informe?"] {
+                  "¿cómo se hace una auditoría interna?", "¿qué es un informe?",
+                  "¿qué significa auditoría?", "¿para qué sirve una auditoría?", "¿en qué consiste una auditoría?",
+                  "¿cuánto cuesta una auditoría contable?", "¿quién hace una auditoría fiscal?", "¿cómo funciona una auditoría?",
+                  "explícame qué es una auditoría", "una auditoría energética para mi casa", "¿cómo llevo el inventario de mi tienda?",
+                  "¿qué programa uso para el inventario?", "el inventario de la cocina",
+                  "¿cuánto cobra un contador por una auditoría?", "¿tenemos informe de seguridad?", "¿cómo hago el informe?"] {
             check("everyday: «\(q)» stays out", route(q) == .normal, "\(route(q))")
         }
         for q in ["la auditoría de mi web", "el informe de mi equipo"] {
             check("«de mi» no longer cuts: «\(q)»", isVault(route(q)), "\(route(q))")
         }
         check("¿cómo hago un informe?: for Claude", route("¿cómo hago un informe?") == .normal)
-        check("«estado» makes no order", route("Haz el estado de cuentas") == .normal)
+        for q in ["Haz una copia de seguridad", "Crea una copia de seguridad de mis fotos", "Genera una contraseña de seguridad",
+                  "Redacta un informe sobre la Revolución Francesa", "Hazme un informe de lectura", "Crea un reporte de gastos en Excel",
+                  "Prepara un informe para mi clase de biología", "Haz una lista de ventas", "Haz el informe de ventas",
+                  "Necesito que hagas un informe de ventas", "¿me puedes hacer un informe?", "Jarvis, pídele a redes un copy"] {
+            check("no brand nor Michael, for Claude: «\(q)»", route(q) == .normal, "\(route(q))")
+        }
+        check("a reminder about a brand is the user's", route("Crea un recordatorio de la auditoría de HispanoHost") == .normal)
+        check("a note about a brand too", route("Crea una nota de la auditoría de HispanoHost") == .normal)
         check("a reminder for Michael is his", route("Crea un recordatorio para Michael de la auditoría") == .order)
         check("with a brand, «qué es» still looks", isVault(route("¿qué es HispanoHost?")))
         for q in ["Bueno, pídele a seguridad que revise HispanoHost", "Entonces programa un post para HispanoHost",
@@ -508,6 +526,11 @@ enum JarvisVaultTests {
         turn = await JarvisVault.turn("¿Qué dice la auditoría de Acme?", awaitingAnswer: false, markdown: true, deps: deps(brands: brands, docs: docs, calls: calls))
         check("nothing in the vault: on to the web", turn == .pass(miss: true), "\(turn)")
         check("nothing in the vault: it looked", calls.count("search") == 1)
+
+        for q in ["¿qué pasa con HispanoHost?", "¿qué novedades hay de HispanoHost?", "¿qué sabemos de HispanoHost?",
+                  "háblame de HispanoHost", "¿qué hay pendiente de HispanoHost?"] {
+            check("«\(q)»: its reports, no false «nada»", paths(q).count == 3, "\(paths(q))")
+        }
 
         for q in ["¿cuál es el teléfono de HispanoHost?", "¿dónde queda HispanoHost?"] {
             calls = Calls()
