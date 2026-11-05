@@ -40,25 +40,38 @@ enum JarvisVault {
     /// `space-technology` and `spacetechnology`, `Hispano Host` and `hispanohost`: the same.
     static func key(_ text: String) -> String { tokens(text).joined() }
 
-    /// The words that send a message to the vault. Stems.
+    /// The words the vault answers to. Stems.
     static let keywords: Set<String> = ["auditoria", "seguridad", "rede", "informe", "reporte", "estado", "venta"]
+    /// The ones that send a message there on their own: «estado» needs a brand beside it, or
+    /// «¿dónde has estado?» would count.
+    static let routeKeywords = keywords.subtracting(["estado"])
+    /// Everyday phrases that hold a keyword and aren't about it.
+    static let everydayPhrases: Set<String> = ["estados unidos", "seguridad social", "redes sociales", "redes neuronales"]
     /// Too common to tell one report from another.
     static let genericWords: Set<String> = ["informe", "reporte", "estado"]
     /// Coucou reads these itself (service_info): «ventas de Stripe» is not a vault question.
     static let services: Set<String> = ["stripe", "github", "vercel", "resend", "n8n", "notion", "cal", "spotify", "claude", "codex"]
     /// A mail is drafted on the card, whoever it names.
     static let mailWords: Set<String> = ["correo", "email", "mail", "gmail"]
-    static let fillers: Set<String> = ["jarvis", "oye", "hey", "ok", "okay", "hola", "porfa", "por", "favor"]
+    /// A reminder or a note is the user's own, whatever it is about.
+    static let personalWords: Set<String> = ["recordatorio", "recordatorios", "alarma", "alarmas", "temporizador", "nota", "notas"]
+    static let fillers: Set<String> = ["jarvis", "oye", "hey", "ok", "okay", "hola", "porfa", "por", "favor", "bueno", "entonces",
+                                       "pues", "y", "e", "vale", "venga", "ahora", "tambien", "mejor", "eh", "ey"]
 
     static let orderVerbs: Set<String> = [
         "haz", "hazme", "hazle", "hagan", "pide", "pidele", "pideles", "pidan", "programa", "programame", "programen",
         "agenda", "agendame", "encarga", "encargale", "prepara", "preparame", "genera", "generame", "crea", "creame",
-        "redacta", "publica", "lanza", "dile", "diles", "avisa", "avisale",
+        "redacta", "publica", "lanza", "dile", "diles", "avisa", "avisale", "manda", "mandale", "mandales", "manden",
+        "envia", "enviale", "envien", "audita", "auditen",
     ]
     static let orderInfinitives: Set<String> = [
         "hacer", "hacerme", "pedir", "pedirle", "pedirles", "programar", "agendar", "encargar", "encargarle", "preparar",
-        "generar", "crear", "redactar", "publicar", "lanzar", "decirle", "avisar", "avisarle",
+        "generar", "crear", "redactar", "publicar", "lanzar", "decirle", "avisar", "avisarle", "mandar", "enviar", "auditar",
     ]
+    /// Orders that speak to someone: they need a brand or Michael, or «dile a mi mamá…» counts.
+    static let personVerbs: Set<String> = ["dile", "diles", "decirle", "avisa", "avisale", "avisar", "avisarle"]
+    /// «Quiero que me digas…» asks; it doesn't order.
+    static let askingVerbs: Set<String> = ["digas", "cuentes", "expliques", "muestres", "ensenes", "pases", "leas", "resumas"]
     static let stopWords: Set<String> = [
         "de", "del", "la", "el", "los", "las", "lo", "le", "les", "un", "una", "unos", "unas", "uno", "y", "e", "o", "u",
         "a", "al", "en", "con", "sin", "por", "para", "que", "como", "cual", "cuales", "cuando", "donde", "quien", "sobre",
@@ -68,8 +81,40 @@ enum JarvisVault {
         "dice", "dicen", "decir", "relacionado", "relacionada", "relacionados", "relacionadas", "nuevo", "nueva", "nuevos",
         "nuevas", "ultimo", "ultima", "ultimos", "ultimas", "reciente", "recientes", "algo", "todo", "toda", "todos", "todas",
         "mas", "muy", "tal", "entonces", "pues", "hoy", "ayer", "jarvis", "oye", "hola", "porfa", "favor", "the", "what",
-        "how", "of", "is", "and",
+        "how", "of", "is", "and", "semana", "mes", "ano", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+        "agosto", "septiembre", "octubre", "noviembre", "diciembre",
     ]
+
+    /// `words` without the everyday phrases, nor a keyword about the speaker's own things
+    /// («la seguridad de mi contraseña»).
+    static func meaningful(_ words: [String]) -> [String] {
+        var kept: [String] = []
+        var i = 0
+        while i < words.count {
+            if i + 1 < words.count, everydayPhrases.contains("\(words[i]) \(words[i + 1])") { i += 2; continue }
+            let own = i + 2 < words.count && words[i + 1] == "de" && ["mi", "mis"].contains(words[i + 2])
+            if !(own && keywords.contains(stem(words[i]))) { kept.append(words[i]) }
+            i += 1
+        }
+        return kept
+    }
+
+    /// The stems worth comparing. Stop words go first: "cuales" would stem past the list.
+    static func stems(of words: [String]) -> Set<String> {
+        Set(words.filter { !stopWords.contains($0) }.map(stem)).filter { $0.count >= 3 && !stopWords.contains($0) }
+    }
+
+    /// What reads as a name: capitalised inside the sentence, or right after «de».
+    static func nameTerms(_ text: String) -> Set<String> {
+        let raw = text.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        var names = Set<String>()
+        for (i, word) in raw.enumerated() {
+            let capital = i > 0 && word.first?.isUppercase == true
+            let afterDe = i > 0 && ["de", "del"].contains(fold(raw[i - 1]))
+            if capital || afterDe { names.formUnion(stems(of: [fold(word)])) }
+        }
+        return names.subtracting(keywords)
+    }
 
     // MARK: Brands and clients
 
@@ -116,9 +161,10 @@ enum JarvisVault {
     }
 
     /// The brand the message names, by whole words: "Hispano Host" and "hispanohost.net" count,
-    /// "parte" doesn't name a brand called "arte". The longest match wins.
+    /// "parte" doesn't name a brand called "arte", nor «seguridad social» one called
+    /// "social". The longest match wins.
     static func mentioned(in text: String, brands: [Brand]) -> Brand? {
-        let words = tokens(text)
+        let words = meaningful(tokens(text))
         for size in stride(from: 4, through: 1, by: -1) where words.count >= size {
             for start in 0...(words.count - size) {
                 let joined = words[start..<(start + size)].joined()
@@ -136,20 +182,54 @@ enum JarvisVault {
         case order              // for Michael's inbox
     }
 
-    /// An order starts with its verb: «Programa un post…», «Oye, pídele a…», «¿Puedes
-    /// pedirle…?», «¿Me puedes hacer…?», «Quiero que…». «¿Qué programa usa…?» is a question.
-    static func isOrder(_ text: String) -> Bool {
-        var words = tokens(text)[...]
+    /// The text cut at punctuation and at « y », each part with whether it asks.
+    private static func clauses(_ text: String) -> [(words: [String], asked: Bool)] {
+        let spaced = fold(text).replacingOccurrences(of: #"\s+y\s+"#, with: ", ", options: .regularExpression)
+        var parts: [(words: [String], asked: Bool)] = []
+        var current = ""
+        var asked = false
+        func close() {
+            let words = tokens(current)
+            if !words.isEmpty { parts.append((words, asked)) }
+            current = ""
+            asked = false
+        }
+        for character in spaced {
+            switch character {
+            case "¿":                                   close(); asked = true
+            case "?":                                   asked = true; close()
+            case ",", ";", ".", ":", "!", "¡", "\n":    close()
+            default:                                    current.append(character)
+            }
+        }
+        close()
+        return parts
+    }
+
+    private static func orderVerb(in clause: (words: [String], asked: Bool)) -> String? {
+        var words = clause.words[...]
         while let first = words.first, fillers.contains(first) { words = words.dropFirst() }
         if words.first == "me", ["puedes", "podrias"].contains(words.dropFirst().first ?? "") { words = words.dropFirst() }
-        guard let first = words.first else { return false }
-        let second = words.dropFirst().first
+        guard let first = words.first, let second = words.dropFirst().first else { return nil }
         if ["puedes", "podrias", "pueden", "podrian"].contains(first) {
             let next = second == "me" || second == "le" ? words.dropFirst(2).first : second
-            return next.map(orderInfinitives.contains) ?? false
+            return next.flatMap { orderInfinitives.contains($0) ? $0 : nil }
         }
-        if ["quiero", "necesito"].contains(first) { return second == "que" }
-        return orderVerbs.contains(first) && !text.contains("?")
+        if ["quiero", "necesito"].contains(first) {
+            guard second == "que" else { return nil }
+            let rest = words.dropFirst(2).drop { $0 == "me" || $0 == "nos" }
+            return rest.first.map(askingVerbs.contains) == true ? nil : first
+        }
+        // «programa de ventas», «agenda de HispanoHost»: the noun.
+        guard orderVerbs.contains(first), !clause.asked, second != "de", second != "del" else { return nil }
+        return first
+    }
+
+    /// The verb of an order, at the start of any clause: «Programa un post…», «Bueno, pídele
+    /// a…», «¿Puedes pedirle…?», «Quiero que…». «¿Qué programa usa…?» is a question, and
+    /// «Haz un informe, ¿vale?» is still an order.
+    static func orderVerb(_ text: String) -> String? {
+        clauses(text).lazy.compactMap(orderVerb(in:)).first
     }
 
     /// `awaitingAnswer`: the assistant just asked something (a mail's subject, say) and this
@@ -159,8 +239,12 @@ enum JarvisVault {
         let words = tokens(text)
         guard mailWords.isDisjoint(with: words) else { return .normal }
         let brand = mentioned(in: text, brands: brands)
-        let keyword = !keywords.isDisjoint(with: words.map(stem))
-        if isOrder(text) { return brand != nil || keyword || words.contains("michael") ? .order : .normal }
+        let keyword = !routeKeywords.isDisjoint(with: meaningful(words).map(stem))
+        let michael = words.contains("michael")
+        if let verb = orderVerb(text) {
+            guard personalWords.isDisjoint(with: words), !personVerbs.contains(verb) || brand != nil || michael else { return .normal }
+            return brand != nil || keyword || michael ? .order : .normal
+        }
         if let brand { return .vault(brand) }
         guard keyword, services.isDisjoint(with: words) else { return .normal }
         return .vault(nil)
@@ -211,6 +295,12 @@ enum JarvisVault {
         guard let range = text.range(of: #"^\d{4}-\d{2}-\d{2}"#, options: .regularExpression) else { return nil }
         let day = String(text[range])
         return monthIndex(day) == nil ? nil : day
+    }
+
+    /// A date anywhere in a file or folder name: 2026-10-25-informe, chat-2026-11-05.
+    private static func dayInName(_ name: String) -> String? {
+        guard let range = name.range(of: #"(?<![0-9])\d{4}-\d{2}-\d{2}(?![0-9])"#, options: .regularExpression) else { return nil }
+        return isoDay(String(name[range]))
     }
 
     private static func monthIndex(_ day: String) -> Int? {
@@ -268,18 +358,18 @@ enum JarvisVault {
         for candidate in [front["fecha"], front["medido"], front["actualizado"]] {
             if let day = isoDay(unquoted(candidate)) { fecha = day; break }
         }
-        if fecha.isEmpty { fecha = parts.reversed().lazy.compactMap(isoDay).first ?? "" }
+        if fecha.isEmpty { fecha = parts.reversed().lazy.compactMap(dayInName).first ?? "" }
         var departamento = unquoted(front["departamento"])
         if departamento.isEmpty, parts.count >= 3, parts[0] == "informes" { departamento = parts[1] }
-        let stems = Set(tokens(body + " " + unquoted(front["tipo"]) + " " + unquoted(front["tema"])).map(stem))
-            .filter { $0.count >= 3 && !stopWords.contains($0) }
+        let stems = stems(of: tokens(body + " " + unquoted(front["tipo"]) + " " + unquoted(front["tema"])))
         return Doc(path: path, modified: modified, size: data.count, empresa: unquoted(front["empresa"]),
                    departamento: departamento, fecha: fecha, titulo: title(body: body, fileStem: fileName),
                    resumen: summary(body: body), words: Array(stems.sorted().prefix(maxWords)))
     }
 
-    /// Walks the two folders without following links. Files whose date and size didn't change
-    /// are kept from `previous`, unread.
+    /// Walks the two folders without following links, hard ones included (a second name for a
+    /// file of vault/aprobaciones). A name with `_` is a template. Files whose date and size
+    /// didn't change are kept from `previous`, unread.
     static func scan(vault: URL, previous: Index) -> Index {
         let known = previous.vault == vault.path ? Dictionary(previous.docs.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a }) : [:]
         var docs: [Doc] = []
@@ -287,7 +377,7 @@ enum JarvisVault {
         func walk(_ dir: URL, _ relative: String, _ depth: Int) {
             guard depth <= maxDepth, docs.count < maxDocs else { return }
             for name in ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).sorted()
-            where !name.hasPrefix(".") && docs.count < maxDocs {
+            where !name.hasPrefix(".") && !name.hasPrefix("_") && docs.count < maxDocs {
                 let url = dir.appendingPathComponent(name)
                 let path = "\(relative)/\(name)"
                 var st = stat()
@@ -295,7 +385,7 @@ enum JarvisVault {
                 switch st.st_mode & S_IFMT {
                 case S_IFDIR:
                     walk(url, path, depth + 1)
-                case S_IFREG where name.lowercased().hasSuffix(".md") && st.st_size <= maxFileSize:
+                case S_IFREG where name.lowercased().hasSuffix(".md") && st.st_size <= maxFileSize && st.st_nlink == 1:
                     let modified = Double(st.st_mtimespec.tv_sec) + Double(st.st_mtimespec.tv_nsec) / 1e9
                     if let doc = known[path], doc.modified == modified, doc.size == Int(st.st_size) {
                         docs.append(doc)
@@ -324,26 +414,37 @@ enum JarvisVault {
         let score: Int
     }
 
+    /// The files of one report: the same audit under the same title. They take one place.
+    static let reportFamily = ["informe", "informe-completo", "resumen-gratis", "borrador"]
+
+    private static func reportFolder(_ doc: Doc) -> String? {
+        reportFamily.contains(doc.fileStem) ? (doc.path as NSString).deletingLastPathComponent : nil
+    }
+
     /// The `limit` reports that best answer `question`. A named brand brings its reports, but
     /// never only them: the security inventory is filed under `space-technology`, so the words
-    /// count on their own and each pick prefers a word nothing picked yet covers. Without a
-    /// brand, a word the vault doesn't know («la auditoría de Acme») means it isn't there.
+    /// count on their own and each pick prefers a word nothing picked yet covers. A word no
+    /// report has means the vault doesn't know: with a brand, any such word when no other is
+    /// found («el teléfono de HispanoHost»); without one, a name («la auditoría de Acme»).
+    /// Without a brand a word in the text proves nothing: it must be in a report's department,
+    /// title or path.
     static func search(_ question: String, brand: Brand?, brands: [Brand], docs: [Doc], limit: Int = resultLimit) -> [Hit] {
-        let brandWords = Set(brand?.keys ?? [])
-        var terms = Set(tokens(question).map(stem)).filter { $0.count >= 3 && !stopWords.contains($0) && !brandWords.contains($0) }
+        var said = meaningful(tokens(question))
         if let brand {
             // "Hispano Host" said in two words: neither is a term to look for.
-            let words = tokens(question)
-            for size in 2...4 where words.count >= size {
-                for start in 0...(words.count - size) where brand.keys.contains(words[start..<(start + size)].joined()) {
-                    terms.subtract(words[start..<(start + size)].map(stem))
+            for size in stride(from: 4, through: 1, by: -1) where said.count >= size {
+                var start = 0
+                while start + size <= said.count {
+                    if brand.keys.contains(said[start..<(start + size)].joined()) { said.removeSubrange(start..<(start + size)) } else { start += 1 }
                 }
             }
         }
-        let specific = terms.subtracting(keywords)
+        let terms = stems(of: said)
+        let telling = terms.subtracting(genericWords)
+        let names = nameTerms(question).subtracting(stems(of: tokens(brand?.name ?? "")))
         let sisters = brand == nil ? [] : Set(brands.filter { $0.isMarca && $0 != brand }.flatMap(\.keys))
 
-        struct Candidate { let hit: Hit; let strong: Set<String> }
+        struct Candidate { let hit: Hit; var strong: Set<String> }
         var pool: [Candidate] = []
         for doc in docs {
             let empresa = key(doc.empresa)
@@ -357,33 +458,49 @@ enum JarvisVault {
             let inPath = Set(tokens(doc.path).map(stem))
             let inBody = Set(doc.words)
             let covered = terms.filter { inDepartment.contains($0) || inTitle.contains($0) || inPath.contains($0) || inBody.contains($0) }
-            let telling = covered.subtracting(genericWords)
-            if brand == nil {
+            let filed = telling.filter { inDepartment.contains($0) || inTitle.contains($0) || inPath.contains($0) }
+            if brand != nil {
+                if !telling.isEmpty, telling.isDisjoint(with: covered) { continue }
+                if !isBrandDoc, filed.isEmpty { continue }
+            } else {
                 guard !covered.isEmpty else { continue }
-                if !specific.isEmpty, specific.isDisjoint(with: covered) { continue }
-            } else if !isBrandDoc, telling.isEmpty {
-                continue
+                if !names.isEmpty, names.isDisjoint(with: covered) { continue }
+                if !telling.isEmpty, filed.isEmpty { continue }
             }
             var score = isBrandDoc ? 3 : 0
-            var strong = Set<String>()
             for term in covered {
                 if genericWords.contains(term) { score += 1; continue }
-                if inDepartment.contains(term) { score += 6; strong.insert(term) }
-                if inTitle.contains(term) { score += 5; strong.insert(term) }
-                if inPath.contains(term) { score += 3; strong.insert(term) }
+                if inDepartment.contains(term) { score += 6 }
+                if inTitle.contains(term) { score += 5 }
+                if inPath.contains(term) { score += 3 }
                 if inBody.contains(term) { score += 1 }
             }
-            pool.append(Candidate(hit: Hit(doc: doc, score: score), strong: strong))
+            pool.append(Candidate(hit: Hit(doc: doc, score: score), strong: filed))
         }
         pool.sort {
             ($0.hit.score, $0.hit.doc.fecha, $1.hit.doc.path) > ($1.hit.score, $1.hit.doc.fecha, $0.hit.doc.path)
         }
 
+        // One place per report, under the name the family is known by.
+        var reports: [Candidate] = []
+        var places: [String: Int] = [:]
+        for candidate in pool {
+            guard let folder = reportFolder(candidate.hit.doc) else { reports.append(candidate); continue }
+            if let place = places[folder] {
+                reports[place].strong.formUnion(candidate.strong)
+                continue
+            }
+            let family = docs.filter { reportFolder($0) == folder }
+            let main = reportFamily.lazy.compactMap { name in family.first { $0.fileStem == name } }.first ?? candidate.hit.doc
+            places[folder] = reports.count
+            reports.append(Candidate(hit: Hit(doc: main, score: candidate.hit.score), strong: candidate.strong))
+        }
+
         var picked: [Hit] = []
-        var uncovered = terms.subtracting(genericWords)
-        while picked.count < limit, !pool.isEmpty {
-            let next = pool.firstIndex { !$0.strong.isDisjoint(with: uncovered) } ?? 0
-            let candidate = pool.remove(at: next)
+        var uncovered = telling
+        while picked.count < limit, !reports.isEmpty {
+            let next = reports.firstIndex { !$0.strong.isDisjoint(with: uncovered) } ?? 0
+            let candidate = reports.remove(at: next)
             picked.append(candidate.hit)
             uncovered.subtract(candidate.strong)
         }
@@ -438,6 +555,12 @@ enum JarvisVault {
         }
         if let estado { parts.append("Estado: \(estado)") }
         return parts.joined(separator: " ")
+    }
+
+    /// What the caption shows when it isn't what is read aloud: `pnpm estado` alone has a
+    /// source to show too.
+    static func caption(shown: String, spoken: String) -> String? {
+        shown == spoken ? nil : shown
     }
 
     /// Said before an answer that didn't come from the vault.

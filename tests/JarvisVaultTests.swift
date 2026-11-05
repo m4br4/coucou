@@ -91,6 +91,42 @@ enum JarvisVaultTests {
 
         Subieron un 4 %.
         """)
+        // The real vault's shapes: a report's siblings, a template with a brand and a date.
+        let family = audit.replacingOccurrences(of: "informe.md", with: "")
+        for name in ["informe-completo.md", "borrador.md"] {
+            write(vault, family + name, """
+            ---
+            tipo: informe
+            departamento: radar
+            empresa: hispanohost
+            medido: 2026-10-25
+            ---
+            # Auditoría de hispanohost.net
+
+            Tres cabeceras faltan en el sitio.
+            """)
+        }
+        write(vault, "conocimiento/estado-redes.md", """
+        ---
+        empresa: hispanohost
+        actualizado: 2026-10-18
+        ---
+        # Estado de redes
+
+        Alcance estable en las tres cuentas.
+        """)
+        write(vault, "informes/_plantilla-informe.md", """
+        ---
+        tipo: informe
+        empresa: hispanohost
+        fecha: 2026-10-25
+        ---
+        # Plantilla de informe
+
+        teléfono y Audita y correo de la plantilla.
+        """)
+        write(vault, "informes/_viejo/copia.md", "# Auditoría guardada\n")
+        write(vault, "conocimiento/chat-2026-11-05.md", "# Chat con el equipo\n\nNotas sueltas.\n")
         write(vault, "conocimiento/sin-frontmatter.md", "Línea suelta sobre tarifas.\n\nOtra línea.\n")
         write(vault, "conocimiento/informe-diario.json", """
         {"marcas":[{"slug":"hispanohost","nombre":"HispanoHost","dominio":"hispanohost.net"},
@@ -158,13 +194,14 @@ enum JarvisVaultTests {
         check("by domain", JarvisVault.mentioned(in: "mira hispanohost.net", brands: brands)?.name == "HispanoHost")
         check("with accent", JarvisVault.mentioned(in: "Resultados al Día", brands: brands)?.name == "ResultadosAlDía")
         check("client said with spaces", JarvisVault.mentioned(in: "qué tal demo cafe", brands: brands)?.name == "demo-cafe")
+        check("seguridad social names no brand", JarvisVault.mentioned(in: "número de seguridad social", brands: [.init(name: "S", keys: ["social"])]) == nil)
         check("no brand inside another word", JarvisVault.mentioned(in: "hispanohosting barato", brands: brands) == nil)
         check("jarvis is no brand", JarvisVault.brands(vault: tmp, docs: [JarvisVault.parse(path: "conocimiento/j.md", data: Data("---\nempresa: jarvis\n---\n".utf8), modified: 0)]).isEmpty)
 
         // MARK: routing
         check("brand without prefix goes to the vault", isVault(route("¿Cómo va HispanoHost?")))
         check("client goes to the vault", isVault(route("¿qué sabemos de demo cafe?")))
-        for word in ["auditoría", "Auditorias", "seguridad", "redes", "informe", "informes", "estado", "ventas"] {
+        for word in ["auditoría", "Auditorias", "seguridad", "redes", "informe", "informes", "ventas"] {
             check("word «\(word)» goes to the vault", isVault(route("dime algo de \(word) por favor")))
         }
         check("with the Jarvis prefix too", isVault(route("Jarvis, ¿cómo van las ventas?")))
@@ -182,6 +219,25 @@ enum JarvisVaultTests {
                   "¿me puedes hacer un informe?", "quiero que prepares un informe de HispanoHost", "Dile a Michael que estoy"] {
             check("order: «\(q)»", route(q) == .order, "\(route(q))")
         }
+        // John's review, sentence by sentence.
+        for q in ["¿qué tiempo hace en Estados Unidos?", "¿cómo va el estado del tiempo?", "¿dónde has estado?",
+                  "he estado pensando en el precio del dominio", "¿qué es la seguridad social?",
+                  "¿cuál es el número de seguridad social?", "¿qué redes sociales usas?", "¿cómo funcionan las redes neuronales?",
+                  "¿cómo mejorar la seguridad de mi contraseña?", "¿cuál es el estado de la batería?", "la capital del estado de Texas"] {
+            check("everyday: «\(q)» stays out", route(q) == .normal, "\(route(q))")
+        }
+        for q in ["Bueno, pídele a seguridad que revise HispanoHost", "Entonces programa un post para HispanoHost",
+                  "Y haz otra auditoría de HispanoHost", "Haz un informe de HispanoHost, ¿vale?", "Manda el informe a HispanoHost",
+                  "Audita HispanoHost", "¿Cómo va HispanoHost? Programa un post", "Lee el informe y haz otro para HispanoHost"] {
+            check("lost order: «\(q)»", route(q) == .order, "\(route(q))")
+        }
+        for q in ["Quiero que me digas las ventas de HispanoHost", "programa de ventas de HispanoHost", "agenda de HispanoHost"] {
+            check("no order, for the vault: «\(q)»", isVault(route(q)), "\(route(q))")
+        }
+        for q in ["dile a mi mamá que el informe está listo", "Crea un recordatorio de la auditoría"] {
+            check("no order, the user's own: «\(q)»", route(q) == .normal, "\(route(q))")
+        }
+        check("«programa» alone is no order", route("ventas, programa") != .order)
         check("order without brand or word stays out", route("haz un resumen de este texto") == .normal)
         check("programa, the noun", isVault(route("¿Qué programa usa HispanoHost?")))
         check("question about an order word", isVault(route("¿agenda HispanoHost sus informes?")))
@@ -208,6 +264,9 @@ enum JarvisVaultTests {
         check("date from the file name", dated("tipo: x", "informes/x/2026-08-01-algo.md") == "2026-08-01")
         check("date from the folder name", dated("tipo: x", "informes/x/2026-08-02-algo/informe.md") == "2026-08-02")
         check("fecha wins over the name", dated("fecha: 2026-07-01", "informes/x/2026-08-01-algo.md") == "2026-07-01")
+        check("date inside the file name", doc("conocimiento/chat-2026-11-05.md")?.fecha == "2026-11-05", "\(String(describing: doc("conocimiento/chat-2026-11-05.md")?.fecha))")
+        check("a longer number is no date", dated("tipo: x", "conocimiento/12026-10-250.md") == "")
+        check("impossible date in a name ignored", dated("tipo: x", "conocimiento/chat-2026-13-05.md") == "")
         check("impossible date ignored", dated("fecha: 2026-13-01", "conocimiento/a.md") == "")
         check("no date", dated("tipo: x", "conocimiento/a.md") == "")
         check("no frontmatter: indexed", doc("conocimiento/sin-frontmatter.md")?.titulo == "sin-frontmatter")
@@ -224,7 +283,8 @@ enum JarvisVaultTests {
         // MARK: what is indexed
         let all = Set(docs.map(\.path))
         check("only the .md of the two folders", all.allSatisfy { $0.hasSuffix(".md") && ($0.hasPrefix("informes/") || $0.hasPrefix("conocimiento/")) }, "\(all)")
-        check("hidden files and folders never", !all.contains { $0.contains("borrador") || $0.contains("oculta") })
+        check("hidden files and folders never", !all.contains { $0.contains(".borrador") || $0.contains(".oculta") })
+        check("templates never, files or folders", !all.contains { $0.contains("plantilla") || $0.contains("_viejo") })
         check("aprobaciones never", !all.contains { $0.contains("aprobaciones") })
         check("clientes never", !all.contains { $0.contains("clientes") })
         check("the rest of the vault never", !all.contains { $0.contains("fuera") })
@@ -235,6 +295,8 @@ enum JarvisVaultTests {
         try! fm.createSymbolicLink(at: linkedVault.appendingPathComponent("informes/copia.md"), withDestinationURL: linkedVault.appendingPathComponent("aprobaciones/APROBADO-x.md"))
         let linkedDocs = JarvisVault.scan(vault: linkedVault, previous: .init()).docs
         check("a link to aprobaciones isn't followed", linkedDocs.count == docs.count && !linkedDocs.contains { $0.path.contains("atajo") || $0.path.contains("copia") })
+        try! fm.linkItem(at: linkedVault.appendingPathComponent("aprobaciones/APROBADO-x.md"), to: linkedVault.appendingPathComponent("informes/hard.md"))
+        check("nor a hard link", !JarvisVault.scan(vault: linkedVault, previous: .init()).docs.contains { $0.path.contains("hard") })
         let rootLink = tmp.appendingPathComponent("rootlink")
         let rootVault = rootLink.appendingPathComponent("vault")
         try! fm.createDirectory(at: rootVault, withIntermediateDirectories: true)
@@ -266,7 +328,7 @@ enum JarvisVaultTests {
         check("a changed report is read again", found.first?.doc.titulo == "Auditoría pepino largo")
         try! fm.removeItem(at: liveVault.appendingPathComponent("informes/radar/2026-11-01-nueva-auditoria.md"))
         found = await store.search("auditoría pepino", brand: nil, brands: liveBrands, vault: liveVault)
-        check("a deleted report goes", found.isEmpty)
+        check("a deleted report goes", !found.contains { $0.doc.titulo.contains("pepino") }, "\(found.map(\.doc.path))")
 
         let unchanged = JarvisVault.scan(vault: liveVault, previous: JarvisVault.scan(vault: liveVault, previous: .init()))
         var marked = JarvisVault.scan(vault: liveVault, previous: .init())
@@ -300,6 +362,34 @@ enum JarvisVaultTests {
         check("Abraham's question: the audit", answer.contains(audit), "\(answer)")
         check("Abraham's question: the inventory, filed under another empresa", answer.contains(inventory), "\(answer)")
         check("at most three", answer.count == 3, "\(answer)")
+        let spokenByAbraham = paths("si hicieron la auditoría de seguridad y lo relacionado a redes de HispanoHost")
+        check("his words: informe.md and the inventory", spokenByAbraham.contains(audit) && spokenByAbraham.contains(inventory), "\(spokenByAbraham)")
+        check("his words: not its siblings", !spokenByAbraham.contains { $0.hasSuffix("informe-completo.md") || $0.hasSuffix("borrador.md") }, "\(spokenByAbraham)")
+        check("one place per report", paths("hispanohost.net") == [audit], "\(paths("hispanohost.net"))")
+        check("the sibling that matched gives way to informe.md", JarvisVault.search("borrador", brand: nil, brands: brands, docs: docs).map(\.doc.path) == [audit],
+              "\(paths("borrador"))")
+        let loose = (0..<2).map { JarvisVault.parse(path: "informes/seguridad/2026-10-0\($0)-borrador.md", data: Data("---\nfecha: 2026-10-0\($0)\n---\n# Seguridad \($0)\n".utf8), modified: 0) }
+        check("a flat folder keeps its reports apart", JarvisVault.search("seguridad", brand: nil, brands: [], docs: loose).count == 2)
+        for q in ["¿hicieron la auditoría de seguridad?", "¿qué encontraron en la auditoría de seguridad?"] {
+            check("no brand: «\(q)»", paths(q).contains(audit) && paths(q).contains(inventory), "\(paths(q))")
+        }
+        check("no brand: ¿ya terminaron la auditoría?", paths("¿ya terminaron la auditoría?") == [audit], "\(paths("¿ya terminaron la auditoría?"))")
+        let sales = JarvisVault.search("¿cuáles son las ventas?", brand: nil, brands: brands, docs: docs)
+        check("¿cuáles son las ventas?: by department", sales.count == 2 && sales.allSatisfy { $0.doc.departamento == "cobranza-ventas" && $0.score > 1 }, "\(sales.map(\.doc.path))")
+        check("stop words go before the stem", JarvisVault.stems(of: ["cuales", "ventas"]) == ["venta"])
+        check("¿qué ventas tiene Apple?: no report", paths("¿qué ventas tiene Apple?").isEmpty, "\(paths("¿qué ventas tiene Apple?"))")
+        check("a word in the text alone proves nothing", paths("la seguridad de los gatos que dicen tarifas").contains("conocimiento/sin-frontmatter.md") == false)
+        check("¿cuál es el teléfono de HispanoHost?: nothing", paths("¿cuál es el teléfono de HispanoHost?").isEmpty, "\(paths("¿cuál es el teléfono de HispanoHost?"))")
+        check("with a brand, a word in the text counts", paths("¿qué dice HispanoHost de sus cabeceras?") == [audit], "\(paths("¿qué dice HispanoHost de sus cabeceras?"))")
+        let elsewhere = JarvisVault.parse(path: "conocimiento/otra.md", data: Data("---\nempresa: otra-empresa\n---\n# Otra cosa\n\nHabla de cabeceras.\n".utf8), modified: 0)
+        check("with a brand, another company's text doesn't count", JarvisVault.search("¿qué dice HispanoHost de sus cabeceras?", brand: brands.first, brands: brands, docs: docs + [elsewhere]).map(\.doc.path) == [audit])
+        check("an everyday phrase isn't searched either", paths("auditoría de seguridad social") == [audit], "\(paths("auditoría de seguridad social"))")
+        check("a name after de", JarvisVault.nameTerms("la auditoría de Acme") == ["acme"])
+        check("a name after de, as the voice writes it", JarvisVault.nameTerms("ventas de zapatos") == ["zapato"])
+        check("unknown name in lower case: nothing", paths("la auditoría de acme").isEmpty)
+        check("a name in capitals", JarvisVault.nameTerms("qué ventas tiene Apple") == ["apple"])
+        check("the first word is no name", JarvisVault.nameTerms("Terminaron la auditoría").isEmpty)
+        check("a month is no name", paths("la auditoría de octubre").contains(audit), "\(paths("la auditoría de octubre"))")
         let noBrandCover = paths("auditoría de seguridad")
         check("without the brand too", noBrandCover.contains(audit) && noBrandCover.contains(inventory), "\(noBrandCover)")
         let recent = paths("¿Cómo va HispanoHost?")
@@ -330,6 +420,8 @@ enum JarvisVaultTests {
         check("no file read aloud", !said.contains(".md"), said)
         check("title and date read aloud", said.contains("Según Auditoría de hispanohost.net, 25 de octubre: Tres cabeceras"), said)
         check("no heading: the department", said.contains("Según el informe de seguridad, 25 de octubre"), said)
+        check("estado alone has a caption", JarvisVault.caption(shown: "Según `pnpm estado`, 5-nov: x", spoken: "Estado: x") != nil)
+        check("an order has none", JarvisVault.caption(shown: "Michael dice: x", spoken: "Michael dice: x") == nil)
         check("web said", JarvisVault.missNotice(usedWeb: true).contains("web") && JarvisVault.missNotice(usedWeb: true).contains("vault"))
         check("no web, not claimed", !JarvisVault.missNotice(usedWeb: false).contains("web"))
         check("web result seen", JarvisVault.usedWeb([["type": "server_tool_use"], ["type": "web_search_tool_result"]]))
@@ -368,6 +460,22 @@ enum JarvisVaultTests {
         turn = await JarvisVault.turn("¿Cómo van las ventas de zapatos en Panamá?", awaitingAnswer: false, markdown: true, deps: deps(brands: brands, docs: docs, calls: calls))
         check("nothing in the vault: on to the web", turn == .pass(miss: true), "\(turn)")
         check("nothing in the vault: it looked", calls.count("search") == 1)
+
+        for q in ["¿cuál es el teléfono de HispanoHost?", "¿qué ventas tiene Apple?"] {
+            calls = Calls()
+            turn = await JarvisVault.turn(q, awaitingAnswer: false, markdown: true, deps: deps(brands: brands, docs: docs, calls: calls))
+            check("«\(q)»: on to the web", turn == .pass(miss: true), "\(turn)")
+        }
+
+        for q in ["¿dónde has estado?", "¿qué es la seguridad social?", "la capital del estado de Texas"] {
+            calls = Calls()
+            turn = await JarvisVault.turn(q, awaitingAnswer: false, markdown: true, deps: deps(brands: brands, docs: docs, calls: calls))
+            check("«\(q)»: no notice, no vault", turn == .pass(miss: false) && calls.all.isEmpty, "\(turn)")
+        }
+
+        calls = Calls()
+        turn = await JarvisVault.turn("Audita HispanoHost", awaitingAnswer: false, markdown: true, deps: deps(brands: brands, docs: docs, calls: calls))
+        check("Audita HispanoHost: to Michael, no template cited", calls.count("send") == 1 && calls.count("search") == 0)
 
         calls = Calls()
         turn = await JarvisVault.turn("¿Qué tiempo hace mañana?", awaitingAnswer: false, markdown: true, deps: deps(brands: brands, docs: docs, calls: calls))

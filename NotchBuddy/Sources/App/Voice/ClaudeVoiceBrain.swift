@@ -55,7 +55,7 @@ final class ClaudeVoiceBrain {
             trimHistory()
             if fromVault { vaultText = true }
             let text = fromVault ? JarvisLink.spokenReply(VoiceQuery.spokenText(answer)).text : answer
-            return Reply(text: text, acted: false, failed: false, shown: fromVault ? shown : nil)
+            return Reply(text: text, acted: false, failed: false, shown: JarvisVault.caption(shown: shown, spoken: answer))
         case .pass(let miss):
             vaultMiss = miss
             if miss { JarvisTurn.set(true) }
