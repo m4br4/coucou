@@ -30,7 +30,7 @@ enum JarvisLinkTests {
         check("question: leading dashes dropped", JarvisLink.cleanQuestion("--help me") == "help me")
         check("question: too long refused", JarvisLink.cleanQuestion(String(repeating: "a", count: 501)) == nil)
         check("estado arguments", JarvisLink.estadoArguments(brand: "hispanohost", question: "¿qué tal?")
-              == ["-s", "estado", "hispanohost", "¿qué tal?", "--voz"])
+              == ["-s", "estado", "hispanohost", "¿qué tal?", "--voz", "--sin-guardar"])
 
         // MARK: spoken lines
         let eight = (1...8).map { "Línea \($0)" }.joined(separator: "\n")

@@ -7,8 +7,8 @@ import Foundation
 // Mac only. Pure Foundation, no AppKit: compiled into the app and into
 // tests/JarvisLinkTests.swift.
 //
-// - A status question runs `pnpm estado <brand> "<question>" --voz` in Jarvis/fabrica
-//   (read-only); its ≤6 plain lines are read aloud as they are.
+// - A status question runs `pnpm estado <brand> "<question>" --voz --sin-guardar` in
+//   Jarvis/fabrica; its ≤6 plain lines are read aloud as they are.
 // - Anything else becomes one message for Michael (god) in the hive, written like HQ's
 //   (Jarvis/hq/src/lib/server/chat.ts) but marked as coming from the voice, unverified;
 //   his reply in hive/agents/god/hq-replies/ is read aloud if it comes within a minute.
@@ -30,7 +30,7 @@ enum JarvisLink {
         URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
     }
 
-    // MARK: Status (pnpm estado --voz)
+    // MARK: Status (pnpm estado --voz --sin-guardar)
 
     enum EstadoOutcome: Equatable {
         case answer(String)       // the lines to read, already joined
@@ -58,8 +58,9 @@ enum JarvisLink {
         return t
     }
 
+    /// Without `--sin-guardar`, estado writes the user's words in the vault.
     static func estadoArguments(brand: String, question: String) -> [String] {
-        ["-s", "estado", brand, question, "--voz"]
+        ["-s", "estado", brand, question, "--voz", "--sin-guardar"]
     }
 
     /// At most 6 non-empty lines, each ending with punctuation, so they are read as

@@ -269,7 +269,7 @@ final class ClaudeService {
         #endif
         guard state.chatProvider == .anthropic else {
             #if !APPSTORE
-            if vaultMiss { state.chatHistory.append(ChatMessage(role: .assistant, content: JarvisVault.missNotice(usedWeb: false))) }
+            if vaultMiss { state.chatHistory.append(ChatMessage(role: .assistant, content: JarvisVault.missNotice(usedWeb: false, message: query))) }
             #endif
             await chatOpenAICompatible(query: query, context: context, state: state)
             return
@@ -314,7 +314,7 @@ final class ClaudeService {
 
         do {
             let data = try await callAPI(body: body, key: key, beta: "web-search-2025-03-05")
-            await handleChatResult(data, state: state, vaultMiss: vaultMiss)
+            await handleChatResult(data, state: state, vaultMissFor: vaultMiss ? query : nil)
         } catch {
             conversationMessages.removeLast()
             await showError(error.localizedDescription, state: state)
@@ -688,7 +688,7 @@ final class ClaudeService {
 
     // MARK: - Chat result handler
 
-    private func handleChatResult(_ data: Data, state: AppState, vaultMiss: Bool = false) async {
+    private func handleChatResult(_ data: Data, state: AppState, vaultMissFor message: String? = nil) async {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let content = json["content"] as? [[String: Any]] else {
             await showError("Unexpected API response.", state: state)
@@ -703,7 +703,7 @@ final class ClaudeService {
             return
         }
         #if !APPSTORE
-        if vaultMiss { text = JarvisVault.missNotice(usedWeb: JarvisVault.usedWeb(content)) + "\n\n" + text }
+        if let message { text = JarvisVault.missNotice(usedWeb: JarvisVault.usedWeb(content), message: message) + "\n\n" + text }
         #endif
         finishChat(text, state: state)
     }

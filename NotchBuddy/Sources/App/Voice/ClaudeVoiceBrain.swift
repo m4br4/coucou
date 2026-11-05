@@ -66,6 +66,7 @@ final class ClaudeVoiceBrain {
         var acted = false
         var spoken = ""
         var usedWeb = false
+        var sentToMichael = false
 
         // Claude may call several tools in a row (look up, then act): at most 5 rounds.
         for _ in 0..<5 {
@@ -95,6 +96,7 @@ final class ClaudeVoiceBrain {
                 let name = use["name"] as? String ?? ""
                 let input = use["input"] as? [String: Any] ?? [:]
                 if name == "jarvis" {
+                    if input["action"] as? String == "message" { sentToMichael = true }
                     // `messages` already holds this round: a web result above the call counts.
                     let answer = await JarvisVoice.handle(input, thirdParty: vaultText || JarvisLink.hasThirdPartyText(messages))
                     jarvisSpoken.append(answer.spoken)
@@ -118,7 +120,7 @@ final class ClaudeVoiceBrain {
         }
 
         var text = VoiceQuery.spokenText(spoken)
-        if vaultMiss, !text.isEmpty, !acted { text = JarvisVault.missNotice(usedWeb: usedWeb) + " " + text }
+        if vaultMiss, !text.isEmpty, !acted { text = JarvisVault.missNotice(usedWeb: usedWeb, message: transcript, sentToMichael: sentToMichael) + " " + text }
         return Reply(text: text, acted: acted, failed: text.isEmpty && !acted)
     }
 

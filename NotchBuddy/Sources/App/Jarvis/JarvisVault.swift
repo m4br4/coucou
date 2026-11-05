@@ -4,8 +4,8 @@ import Foundation
 // MARK: - JarvisVault
 //
 // The chat and the voice look in Jarvis's vault first: a message naming a brand, a client
-// or a word like «auditoría» is answered from vault/informes/** and vault/conocimiento/**
-// (plus `pnpm estado`), citing file and date. The code decides, not the model, so the
+// or a report («auditoría», «informe») is answered from vault/informes/** and vault/conocimiento/**
+// (plus `pnpm estado --sin-guardar` when it asks for metrics), citing file and date. The code decides, not the model, so the
 // answer can't go to the web by choice. Orders still go to Michael.
 //
 // Read-only on the vault: the index lives in Application Support, and nothing but the
@@ -40,23 +40,26 @@ enum JarvisVault {
     /// `space-technology` and `spacetechnology`, `Hispano Host` and `hispanohost`: the same.
     static func key(_ text: String) -> String { tokens(text).joined() }
 
-    /// The words the vault answers to. Stems.
-    static let keywords: Set<String> = ["auditoria", "seguridad", "rede", "informe", "reporte", "estado", "venta"]
-    /// The ones that send a message there on their own: «estado» needs a brand beside it, or
-    /// «¿dónde has estado?» would count.
-    static let routeKeywords = keywords.subtracting(["estado"])
-    /// Everyday phrases that hold a keyword and aren't about it.
-    static let everydayPhrases: Set<String> = ["estados unidos", "seguridad social", "redes sociales", "redes neuronales"]
+    /// The words that send a message to the vault without a brand: a question about a
+    /// report names it. «seguridad», «redes» or «ventas» alone are everyday words. Stems.
+    static let reportWords: Set<String> = ["auditoria", "informe", "reporte", "inventario"]
+    /// Words about the vault's subjects: not names, and enough to make an order Michael's.
+    static let keywords = reportWords.union(["seguridad", "rede", "estado", "venta"])
+    static let orderKeywords = keywords.subtracting(["estado"])
+    /// What `pnpm estado` measures. It calls the services, so only these words run it.
+    static let metricWords: Set<String> = [
+        "alcance", "seguidor", "seguidore", "suscriptor", "suscriptore", "venta", "ingreso", "factura", "facturacion", "anuncio",
+        "campana", "gasto", "trafico", "visita", "lead", "impresion", "impresione", "clic", "conversion", "conversione",
+        "metrica", "estadistica", "engagement", "roas", "ctr", "estado", "numero", "cifra",
+    ]
     /// Too common to tell one report from another.
     static let genericWords: Set<String> = ["informe", "reporte", "estado"]
-    /// Coucou reads these itself (service_info): «ventas de Stripe» is not a vault question.
-    static let services: Set<String> = ["stripe", "github", "vercel", "resend", "n8n", "notion", "cal", "spotify", "claude", "codex"]
     /// A mail is drafted on the card, whoever it names.
     static let mailWords: Set<String> = ["correo", "email", "mail", "gmail"]
-    /// A reminder or a note is the user's own, whatever it is about.
-    static let personalWords: Set<String> = ["recordatorio", "recordatorios", "alarma", "alarmas", "temporizador", "nota", "notas"]
+    /// A reminder is the user's own, whatever it is about.
+    static let personalWords: Set<String> = ["recordatorio", "recordatorios", "alarma", "alarmas", "temporizador"]
     static let fillers: Set<String> = ["jarvis", "oye", "hey", "ok", "okay", "hola", "porfa", "por", "favor", "bueno", "entonces",
-                                       "pues", "y", "e", "vale", "venga", "ahora", "tambien", "mejor", "eh", "ey"]
+                                       "pues", "y", "e", "vale", "venga", "ahora", "tambien", "mejor", "eh", "ey", "si", "verdad"]
 
     static let orderVerbs: Set<String> = [
         "haz", "hazme", "hazle", "hagan", "pide", "pidele", "pideles", "pidan", "programa", "programame", "programen",
@@ -67,11 +70,28 @@ enum JarvisVault {
     static let orderInfinitives: Set<String> = [
         "hacer", "hacerme", "pedir", "pedirle", "pedirles", "programar", "agendar", "encargar", "encargarle", "preparar",
         "generar", "crear", "redactar", "publicar", "lanzar", "decirle", "avisar", "avisarle", "mandar", "enviar", "auditar",
+        "revisar", "correr", "subir",
     ]
+    /// «Que hagan una auditoría…».
+    static let orderSubjunctives: Set<String> = [
+        "haga", "hagan", "pida", "pidan", "programe", "programen", "agende", "agenden", "encargue", "encarguen", "prepare",
+        "preparen", "genere", "generen", "cree", "creen", "redacte", "redacten", "publique", "publiquen", "lance", "lancen",
+        "mande", "manden", "envie", "envien", "audite", "auditen", "revise", "revisen", "corra", "corran", "suba", "suban",
+    ]
+    /// Verbs that are nouns too: they order only before what they act on.
+    static let nounVerbs: Set<String> = ["programa", "agenda"]
+    static let articles: Set<String> = ["un", "una", "unos", "unas", "el", "la", "los", "las", "otro", "otra", "mi", "mis"]
     /// Orders that speak to someone: they need a brand or Michael, or «dile a mi mamá…» counts.
     static let personVerbs: Set<String> = ["dile", "diles", "decirle", "avisa", "avisale", "avisar", "avisarle"]
     /// «Quiero que me digas…» asks; it doesn't order.
-    static let askingVerbs: Set<String> = ["digas", "cuentes", "expliques", "muestres", "ensenes", "pases", "leas", "resumas"]
+    static let askingVerbs: Set<String> = ["digas", "cuentes", "expliques", "muestres", "ensenes", "pases", "leas", "resumas",
+                                           "busques", "veas", "mires", "sepas"]
+    /// How a question starts when the voice writes it without its marks, or asks by ordering.
+    static let questionStarts: Set<String> = [
+        "que", "como", "cual", "cuales", "cuando", "donde", "quien", "quienes", "cuanto", "cuanta", "cuantos", "cuantas", "porque",
+        "hay", "tienes", "tenemos", "hubo", "hicieron", "dime", "dame", "cuentame", "muestrame", "ensename", "pasame", "leeme", "lee",
+        "busca", "buscame",
+    ]
     static let stopWords: Set<String> = [
         "de", "del", "la", "el", "los", "las", "lo", "le", "les", "un", "una", "unos", "unas", "uno", "y", "e", "o", "u",
         "a", "al", "en", "con", "sin", "por", "para", "que", "como", "cual", "cuales", "cuando", "donde", "quien", "sobre",
@@ -84,20 +104,6 @@ enum JarvisVault {
         "how", "of", "is", "and", "semana", "mes", "ano", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
         "agosto", "septiembre", "octubre", "noviembre", "diciembre",
     ]
-
-    /// `words` without the everyday phrases, nor a keyword about the speaker's own things
-    /// («la seguridad de mi contraseña»).
-    static func meaningful(_ words: [String]) -> [String] {
-        var kept: [String] = []
-        var i = 0
-        while i < words.count {
-            if i + 1 < words.count, everydayPhrases.contains("\(words[i]) \(words[i + 1])") { i += 2; continue }
-            let own = i + 2 < words.count && words[i + 1] == "de" && ["mi", "mis"].contains(words[i + 2])
-            if !(own && keywords.contains(stem(words[i]))) { kept.append(words[i]) }
-            i += 1
-        }
-        return kept
-    }
 
     /// The stems worth comparing. Stop words go first: "cuales" would stem past the list.
     static func stems(of words: [String]) -> Set<String> {
@@ -136,8 +142,7 @@ enum JarvisVault {
                 let slug = marca["slug"] as? String ?? ""
                 let nombre = marca["nombre"] as? String ?? ""
                 let dominio = marca["dominio"] as? String ?? ""
-                let label = dominio.split(separator: ".").first.map(String.init) ?? ""
-                let keys = Set([slug, nombre, label].map(key).filter { $0.count >= 3 })
+                let keys = Set([slug, nombre, dominio].map(key).filter { $0.count >= 3 })
                 guard !keys.isEmpty else { continue }
                 list.append(Brand(name: nombre.isEmpty ? slug : nombre, keys: keys))
             }
@@ -161,10 +166,9 @@ enum JarvisVault {
     }
 
     /// The brand the message names, by whole words: "Hispano Host" and "hispanohost.net" count,
-    /// "parte" doesn't name a brand called "arte", nor «seguridad social» one called
-    /// "social". The longest match wins.
+    /// "parte" doesn't name a brand called "arte". The longest match wins.
     static func mentioned(in text: String, brands: [Brand]) -> Brand? {
-        let words = meaningful(tokens(text))
+        let words = tokens(text)
         for size in stride(from: 4, through: 1, by: -1) where words.count >= size {
             for start in 0...(words.count - size) {
                 let joined = words[start..<(start + size)].joined()
@@ -206,10 +210,15 @@ enum JarvisVault {
         return parts
     }
 
+    private static func unfilled(_ words: [String]) -> ArraySlice<String> {
+        var rest = words[...]
+        while let first = rest.first, fillers.contains(first) { rest = rest.dropFirst() }
+        return rest
+    }
+
     private static func orderVerb(in clause: (words: [String], asked: Bool)) -> String? {
-        var words = clause.words[...]
-        while let first = words.first, fillers.contains(first) { words = words.dropFirst() }
-        if words.first == "me", ["puedes", "podrias"].contains(words.dropFirst().first ?? "") { words = words.dropFirst() }
+        var words = unfilled(clause.words)
+        if ["me", "le", "nos"].contains(words.first ?? ""), ["puedes", "podrias"].contains(words.dropFirst().first ?? "") { words = words.dropFirst() }
         guard let first = words.first, let second = words.dropFirst().first else { return nil }
         if ["puedes", "podrias", "pueden", "podrian"].contains(first) {
             let next = second == "me" || second == "le" ? words.dropFirst(2).first : second
@@ -220,16 +229,48 @@ enum JarvisVault {
             let rest = words.dropFirst(2).drop { $0 == "me" || $0 == "nos" }
             return rest.first.map(askingVerbs.contains) == true ? nil : first
         }
-        // «programa de ventas», «agenda de HispanoHost»: the noun.
-        guard orderVerbs.contains(first), !clause.asked, second != "de", second != "del" else { return nil }
+        guard !clause.asked else { return nil }
+        if first == "hay", second == "que" { return words.dropFirst(2).first.flatMap { orderInfinitives.contains($0) ? "hay" : nil } }
+        if first == "toca" { return orderInfinitives.contains(second) ? first : nil }
+        if first == "que" { return orderSubjunctives.contains(second) ? second : nil }
+        // «programa de ventas», «programa nuevo de…»: the noun.
+        guard orderVerbs.contains(first), !nounVerbs.contains(first) || articles.contains(second) else { return nil }
         return first
     }
 
     /// The verb of an order, at the start of any clause: «Programa un post…», «Bueno, pídele
-    /// a…», «¿Puedes pedirle…?», «Quiero que…». «¿Qué programa usa…?» is a question, and
-    /// «Haz un informe, ¿vale?» is still an order.
+    /// a…», «¿Le puedes pedir…?», «Hay que hacer…», «Que hagan…». «¿Qué programa usa…?» is a
+    /// question, «Haz un informe, ¿vale?» still an order, and in «haz memoria, ¿qué dijo la
+    /// auditoría?» the question that follows is what is asked.
     static func orderVerb(_ text: String) -> String? {
-        clauses(text).lazy.compactMap(orderVerb(in:)).first
+        let parts = clauses(text)
+        for (i, clause) in parts.enumerated() {
+            guard let verb = orderVerb(in: clause) else { continue }
+            let next = i + 1 < parts.count ? parts[i + 1] : nil
+            if let next, next.asked, !unfilled(next.words).isEmpty { continue }
+            return verb
+        }
+        return nil
+    }
+
+    /// «¿Qué es…?», «¿Cómo se hace…?», «¿Cómo hago…?»: general knowledge, for Claude.
+    static func isDefinition(_ text: String) -> Bool {
+        clauses(text).contains { clause in
+            let words = Array(unfilled(clause.words))
+            return words.starts(with: ["que", "es"]) || words.starts(with: ["como", "se", "hace"]) || words.starts(with: ["como", "hago"])
+        }
+    }
+
+    /// Whether the message asks. What doesn't ask may be an order this code didn't see, and the
+    /// answer then says that nothing went to Michael.
+    static func isQuestion(_ text: String) -> Bool {
+        if text.contains("?") || text.contains("¿") { return true }
+        let words = unfilled(tokens(text))
+        guard let first = words.first else { return false }
+        if questionStarts.contains(first) { return true }
+        guard ["quiero", "necesito"].contains(first) else { return false }
+        let rest = words.dropFirst().drop { $0 == "que" || $0 == "me" || $0 == "nos" }
+        return rest.first.map { $0 == "saber" || askingVerbs.contains($0) } ?? false
     }
 
     /// `awaitingAnswer`: the assistant just asked something (a mail's subject, say) and this
@@ -239,14 +280,16 @@ enum JarvisVault {
         let words = tokens(text)
         guard mailWords.isDisjoint(with: words) else { return .normal }
         let brand = mentioned(in: text, brands: brands)
-        let keyword = !routeKeywords.isDisjoint(with: meaningful(words).map(stem))
+        let said = Set(words.map(stem))
         let michael = words.contains("michael")
         if let verb = orderVerb(text) {
-            guard personalWords.isDisjoint(with: words), !personVerbs.contains(verb) || brand != nil || michael else { return .normal }
-            return brand != nil || keyword || michael ? .order : .normal
+            let note = verb.hasPrefix("crea") && !said.isDisjoint(with: ["nota"])
+            let personal = !michael && (note || !personalWords.isDisjoint(with: words))
+            guard !personal, !personVerbs.contains(verb) || brand != nil || michael else { return .normal }
+            return brand != nil || michael || !orderKeywords.isDisjoint(with: said) ? .order : .normal
         }
         if let brand { return .vault(brand) }
-        guard keyword, services.isDisjoint(with: words) else { return .normal }
+        guard !reportWords.isDisjoint(with: said), !isDefinition(text) else { return .normal }
         return .vault(nil)
     }
 
@@ -424,12 +467,12 @@ enum JarvisVault {
     /// The `limit` reports that best answer `question`. A named brand brings its reports, but
     /// never only them: the security inventory is filed under `space-technology`, so the words
     /// count on their own and each pick prefers a word nothing picked yet covers. A word no
-    /// report has means the vault doesn't know: with a brand, any such word when no other is
-    /// found («el teléfono de HispanoHost»); without one, a name («la auditoría de Acme»).
+    /// report files means the vault doesn't know: with a brand, unless two of them are in its
+    /// text («el teléfono de HispanoHost»); without one, a name («la auditoría de Acme»).
     /// Without a brand a word in the text proves nothing: it must be in a report's department,
     /// title or path.
     static func search(_ question: String, brand: Brand?, brands: [Brand], docs: [Doc], limit: Int = resultLimit) -> [Hit] {
-        var said = meaningful(tokens(question))
+        var said = tokens(question)
         if let brand {
             // "Hispano Host" said in two words: neither is a term to look for.
             for size in stride(from: 4, through: 1, by: -1) where said.count >= size {
@@ -460,7 +503,8 @@ enum JarvisVault {
             let covered = terms.filter { inDepartment.contains($0) || inTitle.contains($0) || inPath.contains($0) || inBody.contains($0) }
             let filed = telling.filter { inDepartment.contains($0) || inTitle.contains($0) || inPath.contains($0) }
             if brand != nil {
-                if !telling.isEmpty, telling.isDisjoint(with: covered) { continue }
+                // One word in the text of an unrelated report proves nothing.
+                if !telling.isEmpty, filed.isEmpty, telling.intersection(covered).count < 2 { continue }
                 if !isBrandDoc, filed.isEmpty { continue }
             } else {
                 guard !covered.isEmpty else { continue }
@@ -563,9 +607,23 @@ enum JarvisVault {
         shown == spoken ? nil : shown
     }
 
-    /// Said before an answer that didn't come from the vault.
-    static func missNotice(usedWeb: Bool) -> String {
-        usedWeb ? "No hay nada de esto en el vault; lo busqué en la web." : "No hay nada de esto en el vault."
+    static let nothingSent = "No le pasé nada a Michael."
+
+    /// Said before an answer that didn't come from the vault. `message` not asking means it
+    /// may have been an order, unless Claude did send it.
+    static func missNotice(usedWeb: Bool, message: String, sentToMichael: Bool = false) -> String {
+        let notice = usedWeb ? "No hay nada de esto en el vault; lo busqué en la web." : "No hay nada de esto en el vault."
+        return isQuestion(message) || sentToMichael ? notice : notice + " " + nothingSent
+    }
+
+    /// True when `pnpm estado` has something to say: «No tengo acceso…» is no data.
+    static func hasData(_ estado: String) -> Bool {
+        !fold(estado).trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("no tengo acceso")
+    }
+
+    /// Whether the message asks for what `pnpm estado` measures.
+    static func asksMetrics(_ text: String) -> Bool {
+        !metricWords.isDisjoint(with: tokens(text).map(stem))
     }
 
     static let webHint = " The vault has nothing on this question: use web_search for it."
@@ -600,12 +658,15 @@ enum JarvisVault {
             let (shown, spoken) = await deps.send(text)
             return .answered(shown: shown, spoken: spoken, fromVault: false)
         case .vault(let brand):
-            async let status: String? = brand == nil ? nil : deps.estado(brand!.name, text)
+            async let status: String? = brand != nil && asksMetrics(text) ? deps.estado(brand!.name, text) : nil
             let hits = await deps.search(text, brand, brands)
-            let estado = await status
+            let estado = await status.flatMap { hasData($0) ? $0 : nil }
             guard !hits.isEmpty || estado != nil else { return .pass(miss: true) }
-            return .answered(shown: shown(hits: hits, estado: estado, today: today, vaultName: deps.vaultName, markdown: markdown),
-                             spoken: spoken(hits: hits, estado: estado), fromVault: !hits.isEmpty)
+            let note = isQuestion(text) ? "" : nothingSent
+            let screen = shown(hits: hits, estado: estado, today: today, vaultName: deps.vaultName, markdown: markdown)
+            return .answered(shown: note.isEmpty ? screen : screen + "\n\n" + note,
+                             spoken: note.isEmpty ? spoken(hits: hits, estado: estado) : spoken(hits: hits, estado: estado) + " " + note,
+                             fromVault: !hits.isEmpty)
         }
     }
 }
