@@ -49,8 +49,8 @@ enum VoiceSettings {
         }
     }
 
-    /// Language Coucou LISTENS to: "es" (this fork's default), "auto" (Spanish, then the Mac's
-    /// dictation languages), "en" or "fr". Independent from the answer language: speak French, hear English.
+    /// Language Coucou LISTENS to: "es" (this fork's default), "auto" (Spanish, then English),
+    /// "en" or "fr" (see VoiceLocalePlan). Independent from the answer language: speak French, hear English.
     static var listenLanguage: String {
         get { UserDefaults.standard.string(forKey: "voiceListenLanguage") ?? "es" }
         set { UserDefaults.standard.set(newValue, forKey: "voiceListenLanguage") }

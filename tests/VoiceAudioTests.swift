@@ -141,6 +141,11 @@ enum VoiceAudioTests {
             check("off wins", status(enabled: false, dictationOff: true) == .off)
             check("paused", status(paused: true).text == "✗ En pausa")
             check("no model", status(unavailable: true).text == "✗ Sin modelo de voz instalado")
+            check("no model names the locale wanted",
+                  VoiceListenStatus.resolve(enabled: true, paused: false, recognizerUnavailable: true,
+                                            recognizer: RecognizerHealth(), audioStartFailed: false,
+                                            recognitionStalled: false, input: mic, locale: nil,
+                                            wantedLocale: "es-MX").text == "✗ Sin modelo de voz para es-MX en este Mac")
             check("Dictation off says where to fix it",
                   status(dictationOff: true).text == "✗ Dictado apagado: actívalo en Ajustes del Sistema → Teclado → Dictado")
             check("Dictation off with a working mic is not listening", !status(dictationOff: true).isListening)
@@ -182,6 +187,127 @@ enum VoiceAudioTests {
             check("no error is no failure", spotterFailure(nil) == nil)
             check("no speech is no failure", spotterFailure(NSError(domain: "kAFAssistantErrorDomain", code: 1110)) == nil)
             check("cancelling is no failure", spotterFailure(NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError)) == nil)
+        }
+
+        // MARK: 5. "You speak" → locale
+        do {
+            typealias Plan = VoiceLocalePlan
+            // macOS answers for a locale, like SFSpeechRecognizer: "es" comes back as "es-419".
+            func mac(_ installed: String...) -> (String) -> String? {
+                { id in
+                    let real = id == "es" ? "es-419" : id == "en" ? "en-CA" : id
+                    return installed.contains(real) ? real : nil
+                }
+            }
+            check("es tries Mexico, then Spain, then plain es",
+                  Plan.candidates(for: "es").prefix(3) == ["es-MX", "es-ES", "es"])
+            check("es stays Spanish", Plan.candidates(for: "es").allSatisfy { $0.hasPrefix("es") })
+            check("auto tries es then en",
+                  Plan.candidates(for: "auto").first == "es-MX"
+                      && Plan.candidates(for: "auto").contains("en-US")
+                      && Plan.candidates(for: "auto").firstIndex(of: "es")! < Plan.candidates(for: "auto").firstIndex(of: "en-US")!)
+            check("en stays English", Plan.candidates(for: "en").allSatisfy { $0.hasPrefix("en") })
+            check("fr stays French", Plan.candidates(for: "fr").allSatisfy { $0.hasPrefix("fr") })
+            check("an unknown value is the fork's Spanish", Plan.candidates(for: "de") == Plan.candidates(for: "es"))
+
+            func plan(_ language: String, parakeet: Bool = false, _ onDevice: @escaping (String) -> String?) -> Plan? {
+                Plan.resolve(listenLanguage: language, parakeet: parakeet, onDevice: onDevice)
+            }
+            check("es uses es-MX", plan("es", mac("es-MX", "es-ES", "en-CA")) == Plan(locale: "es-MX"))
+            check("es falls back to es-ES", plan("es", mac("es-ES", "en-CA")) == Plan(locale: "es-ES"))
+            check("plain es reports what macOS really uses", plan("es", mac("es-419", "en-CA")) == Plan(locale: "es-419"))
+            check("es never listens in English without Parakeet", plan("es", mac("en-CA", "en-US")) == nil)
+            check("fr never listens in English without Parakeet", plan("fr", mac("en-US")) == nil)
+            check("en never listens in Spanish without Parakeet", plan("en", mac("es-MX")) == nil)
+            check("auto takes Spanish first", plan("auto", mac("es-MX", "en-US")) == Plan(locale: "es-MX"))
+            check("auto takes English without Spanish", plan("auto", mac("en-CA")) == Plan(locale: "en-CA"))
+            check("auto with nothing installed", plan("auto", mac()) == nil)
+            check("Parakeet writes the command in the chosen language",
+                  plan("es", parakeet: true, mac("es-MX", "en-US")) == Plan(locale: "es-MX", parakeetCommand: true))
+            check("no Spanish model: English only hears the wake word",
+                  plan("es", parakeet: true, mac("en-US", "en-CA"))
+                      == Plan(locale: "en-US", wakeOnlyFor: "es-MX", parakeetCommand: true))
+            check("no model at all, Parakeet can't hear the wake word", plan("es", parakeet: true, mac()) == nil)
+
+            check("line: plain locale", Plan(locale: "es-MX").statusText == "es-MX")
+            check("line: Parakeet", Plan(locale: "es-MX", parakeetCommand: true).statusText == "es-MX · comando con Parakeet")
+            check("line: wake only says so",
+                  Plan(locale: "en-US", wakeOnlyFor: "es-MX", parakeetCommand: true).statusText
+                      == "wake en-US (sin modelo es-MX) · comando con Parakeet")
+        }
+
+        // MARK: 6. Parakeet's words
+        do {
+            func pick(_ parakeet: String?, recognizer: String = "open spot if I", wakeWords: Int = 0,
+                      coucou: Bool = false) -> String {
+                VoiceCommandText.pick(parakeet: parakeet, recognizer: recognizer, wakeWords: wakeWords, coucou: coucou)
+            }
+            check("Parakeet's words win", pick("abre Spotify") == "abre Spotify")
+            check("the wake phrase comes off", pick("Ok Jarvis, abre Spotify.") == "abre Spotify.")
+            check("a Spanish spelling of the wake word comes off", pick("Yarvis abre Spotify") == "abre Spotify")
+            check("only what follows the last wake phrase", pick("no sé Jarvis abre Spotify") == "abre Spotify")
+            check("Parakeet heard what the recognizer did not", pick("Jarvis abre Spotify", recognizer: "") == "abre Spotify")
+            check("silence stays silence", pick("Jarvis", recognizer: "") == "")
+            check("nothing heard keeps the recognizer", pick(nil) == "open spot if I")
+            check("blank keeps the recognizer", pick("  \n") == "open spot if I")
+            check("only the wake word keeps the recognizer", pick("Jarvis.") == "open spot if I")
+            // What Parakeet Ultra really wrote from `say` in Spanish.
+            check("a misheard wake word comes off",
+                  pick("O Harvis, abrespotiflipó música tranquila.", wakeWords: 2) == "abrespotiflipó música tranquila.")
+            check("a wake phrase Parakeet dropped takes no words with it",
+                  pick("¿Cómo van las ventas de hispanos de esta semana?", wakeWords: 2)
+                      == "¿Cómo van las ventas de hispanos de esta semana?")
+            check("no wake phrase in the turn, nothing comes off", pick("Harvis abre Spotify") == "Harvis abre Spotify")
+            check("a look-alike further on stays", pick("llama ya mismo a Harvis", wakeWords: 1) == "llama ya mismo a Harvis")
+            check("only a misheard wake word keeps the recognizer", pick("Harvis.", wakeWords: 1) == "open spot if I")
+            check("wake words: alone", VoiceCommandText.wakeWordCount(in: "Jarvis", coucou: false) == 1)
+            check("wake words: with ok and a command",
+                  VoiceCommandText.wakeWordCount(in: "ok Jarvis open it", coucou: false) == 2)
+            check("wake words: chatter before", VoiceCommandText.wakeWordCount(in: "so yeah Jarvis open", coucou: false) == 3)
+            check("wake words: none", VoiceCommandText.wakeWordCount(in: "open it", coucou: false) == 0)
+            check("Coucou only comes off when it is on", pick("ok coucou abre Spotify") == "ok coucou abre Spotify")
+            check("Coucou comes off when it is on", pick("ok coucou abre Spotify", coucou: true) == "abre Spotify")
+        }
+
+        // MARK: 7. Command audio
+        do {
+            let mono16k = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+            let raw48k = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
+            func buffer(_ values: [Float], format: AVAudioFormat = mono16k) -> AVAudioPCMBuffer {
+                let b = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(values.count))!
+                b.frameLength = AVAudioFrameCount(values.count)
+                for (i, v) in values.enumerated() { b.floatChannelData![0][i] = v }
+                return b
+            }
+            let capture = VoiceCommandCapture()
+            check("nothing yet", capture.take() == nil)
+            capture.begin(preroll: [buffer([1, 2])])
+            capture.append(buffer([3]))
+            check("preroll then live audio, in order", capture.take() == [1, 2, 3])
+            check("taken once", capture.take() == nil)
+
+            capture.append(buffer([9]))
+            capture.begin(preroll: [buffer([1])])
+            check("a new window drops the old one", capture.take() == [1])
+
+            capture.begin(preroll: [buffer([1])])
+            capture.spoil()
+            capture.append(buffer([2]))
+            check("spoiled gives nothing", capture.take() == nil)
+            capture.begin(preroll: [buffer([1])])
+            check("the next window starts clean", capture.take() == [1])
+
+            capture.begin(preroll: [])
+            capture.append(buffer([1], format: raw48k))
+            check("a raw buffer can't go to Parakeet", capture.take() == nil)
+
+            let limit = VoiceCommandCapture.maxSeconds * 16_000
+            capture.begin(preroll: [])
+            capture.append(buffer([Float](repeating: 1, count: limit)))
+            capture.append(buffer([2, 3]))
+            let kept = capture.take()
+            check("capped at the limit", kept?.count == limit)
+            check("the cap keeps the newest audio", kept?.suffix(2) == [2, 3])
         }
 
         print("\(total - failures)/\(total) tests passed.")

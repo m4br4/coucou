@@ -50,6 +50,7 @@ struct JarvisSettingsBox: View {
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                JarvisRecognitionRow()
                 HStack(spacing: 10) {
                     Text(verbatim: "Carpeta fabrica")
                         .frame(width: 130, alignment: .leading)
@@ -79,6 +80,57 @@ struct JarvisSettingsBox: View {
             .padding(6)
         } label: {
             Text(verbatim: "«Jarvis» — agentes de Abraham")
+        }
+    }
+}
+
+/// Who writes the voice command. The same choice as Coucou Flow → Settings: it changes Flow
+/// dictation too.
+private struct JarvisRecognitionRow: View {
+    @ObservedObject private var store = FlowStore.shared
+    @ObservedObject private var parakeet = Parakeet.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(verbatim: "Reconocimiento")
+                    .frame(width: 130, alignment: .leading)
+                Picker(selection: $store.engine) {
+                    Text(verbatim: "Parakeet").tag(FlowEngine.parakeet)
+                    Text(verbatim: "Mac").tag(FlowEngine.apple)
+                } label: {
+                    Text(verbatim: "Reconocimiento")
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 180)
+                if store.engine == .parakeet { parakeetStatus }
+            }
+            Text(verbatim: "Parakeet escribe el comando en este Mac cuando terminas de hablar; «Jarvis» lo sigue oyendo el reconocedor del Mac. Cambia también el dictado de Flow.")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private var parakeetStatus: some View {
+        switch parakeet.state {
+        case .unsupported:
+            Text("hub.engine.unsupported")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        case .missing:
+            Button(String(localized: "hub.engine.download")) { parakeet.download() }
+        case .downloading(let fraction):
+            ProgressView(value: fraction)
+                .progressViewStyle(.linear)
+                .frame(width: 110)
+        case .ready:
+            Label(String(localized: "hub.engine.installed"), systemImage: "checkmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(.green)
+        case .failed:
+            Button(String(localized: "hub.engine.retry")) { parakeet.download() }
         }
     }
 }

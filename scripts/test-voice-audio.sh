@@ -8,7 +8,10 @@ swiftc \
     NotchBuddy/Sources/App/Voice/EnergyVAD.swift \
     NotchBuddy/Sources/App/Voice/SpotterGeneration.swift \
     NotchBuddy/Sources/App/Voice/VoiceAudio.swift \
+    NotchBuddy/Sources/App/Voice/VoiceCommandCapture.swift \
     NotchBuddy/Sources/App/Voice/VoiceListenStatus.swift \
+    NotchBuddy/Sources/App/Voice/VoiceLocalePlan.swift \
+    NotchBuddy/Sources/App/Voice/WakePhrase.swift \
     tests/VoiceAudioTests.swift \
     -o "$TEST_DIR/voice-audio-tests"
 "$TEST_DIR/voice-audio-tests"

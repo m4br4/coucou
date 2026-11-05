@@ -1,6 +1,7 @@
 #if !APPSTORE
 import AppKit
 import AVFoundation
+import Combine
 import Speech
 
 // MARK: - VoiceEngine
@@ -20,6 +21,8 @@ import Speech
 // - Dictation off in macOS (kLSRErrorDomain/201): no rebuilds, it cannot help. Settings
 //   says so, and the next voice at most every 30 s tries again, to notice it turned on.
 // - endCommand() is idempotent: if not in command mode, only cancels timers.
+// - Parakeet (when chosen and downloaded) rewrites the finished command; the recognizer
+//   still hears the wake word and follows the sentence. See VoiceLocalePlan.
 @MainActor
 final class VoiceEngine: ObservableObject {
     static let shared = VoiceEngine()
@@ -53,7 +56,8 @@ final class VoiceEngine: ObservableObject {
         .resolve(enabled: isEnabled, paused: isPaused, recognizerUnavailable: recognizerUnavailable,
                  recognizer: recognizerHealth, audioStartFailed: audioError != nil,
                  recognitionStalled: recognitionStalled,
-                 input: listeningInput, locale: locale?.identifier)
+                 input: listeningInput, locale: plan?.statusText,
+                 wantedLocale: VoiceLocalePlan.candidates(for: VoiceSettings.listenLanguage).first)
     }
 
     // MARK: - Audio pipeline (main-thread owned)
@@ -61,6 +65,15 @@ final class VoiceEngine: ObservableObject {
     private var audio:   VoiceAudio?
     private var spotter: WakeSpotter?
     private var locale:  Locale?
+    private var plan:    VoiceLocalePlan?
+    /// Only while Parakeet writes the commands.
+    private var commandCapture: VoiceCommandCapture?
+    private var pendingCommands = Set<Int>()
+    private var nextCommandID   = 0
+    private var commandStartedAt = Date.distantPast
+    /// Words the wake phrase took in the recognizer's transcript; 0 when listening directly.
+    private var wakeWords = 0
+    private var recognitionChoice = Set<AnyCancellable>()
 
     private var voiceSegmentActive = false
 
@@ -115,6 +128,8 @@ final class VoiceEngine: ObservableObject {
     private static let minRebuildInterval:       TimeInterval = 5.0
     private static let maxRebuildsPerMinute                   = 5
     private static let dictationRetryInterval:   TimeInterval = 30.0
+    /// A first load of Parakeet can take long: the recognizer's words go out instead.
+    private static let parakeetCommandTimeout:   TimeInterval = 8.0
 
     private static let cancelPhrases = ["annule", "annuler", "cancel", "laisse tomber", "never mind"]
 
@@ -125,6 +140,7 @@ final class VoiceEngine: ObservableObject {
         let buildHash = Bundle.main.object(forInfoDictionaryKey: "CoucouGitHash") as? String ?? "unknown"
         appendAppLog("nb.log", "[Voice] build \(buildHash)")
         observeSystemEvents()
+        observeRecognitionChoice()
         if isEnabled && !isPaused { startAudioPipeline() }
     }
 
@@ -144,10 +160,25 @@ final class VoiceEngine: ObservableObject {
 
     /// Settings → Voice language changed: restart recognition in the new language.
     func reloadLanguage() {
-        guard audio != nil else { return }
+        restartRecognition()
+        VoiceBrain.shared.endConversation()   // next session gets instructions in the new language
+    }
+
+    /// `recognizerUnavailable`: no pipeline yet, but the new choice may have a model.
+    private func restartRecognition() {
+        guard audio != nil || recognizerUnavailable else { return }
         stopAudioPipeline()
         if isEnabled && !isPaused { startAudioPipeline() }
-        VoiceBrain.shared.endConversation()   // next session gets instructions in the new language
+    }
+
+    /// Parakeet chosen, downloaded or removed, from Settings or from Coucou Flow.
+    private func observeRecognitionChoice() {
+        FlowStore.shared.$engine.removeDuplicates().dropFirst()
+            .map { _ in () }
+            .merge(with: Parakeet.shared.$state.map { $0 == .ready }.removeDuplicates().dropFirst().map { _ in () })
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in MainActor.assumeIsolated { self?.restartRecognition() } }
+            .store(in: &recognitionChoice)
     }
 
     /// Start the next conversation turn (re-listen for 8 s without wake phrase).
@@ -179,6 +210,8 @@ final class VoiceEngine: ObservableObject {
         isListeningForCommand = true
         commandTranscript     = ""
         lastWordCount         = 0
+        commandStartedAt      = Date()
+        wakeWords             = 0
         directInitialTimeout  = firstWordTimeout
         loggedDropWhileSpeaking = false
         audio.bypassVAD       = true
@@ -186,6 +219,7 @@ final class VoiceEngine: ObservableObject {
         appendAppLog("nb.log", "[Voice] direct listen start (firstWordTimeout: \(firstWordTimeout)s)")
         NotificationCenter.default.post(name: .voiceWoke, object: "direct" as NSString)
         let preroll = audio.drainPreroll()
+        commandCapture?.begin(preroll: preroll)
         // startInCommandPhase: skip wake-phrase gate, deliver speech directly as command.
         let started = spotter.beginWindow(locale: loc, preroll: preroll, startInCommandPhase: true)
         if !started {
@@ -194,6 +228,7 @@ final class VoiceEngine: ObservableObject {
                 guard let self, self.isListeningForCommand else { return }
                 guard let spotter = self.spotter, let audio = self.audio, let loc = self.locale else { return }
                 let preroll2 = audio.drainPreroll()
+                self.commandCapture?.begin(preroll: preroll2)
                 let started2 = spotter.beginWindow(locale: loc, preroll: preroll2, startInCommandPhase: true)
                 if !started2 {
                     appendAppLog("nb.log", "[Voice] direct listen still refused, giving up")
@@ -210,23 +245,30 @@ final class VoiceEngine: ObservableObject {
                                       execute: maxItem)
     }
 
-    /// Locale used for the current recognition session — nil if pipeline is not running.
-    var speechLocale: Locale? { locale }
+    /// Locale of the language spoken — nil if the pipeline is not running, or when the
+    /// recognizer only hears the wake word in another language.
+    var speechLocale: Locale? { plan?.wakeOnlyFor == nil ? locale : nil }
 
     // MARK: - Pipeline lifecycle
 
     private func startAudioPipeline() {
         guard audio == nil else { return }
-        guard let loc = suitableLocale() else {
+        guard let plan = recognitionPlan() else {
             recognizerUnavailable = true
             appendAppLog("nb.log", "[Voice] no suitable on-device recognizer — voice disabled")
             return
         }
+        let loc = Locale(identifier: plan.locale)
         recognizerUnavailable = false
         audioError = nil
         recognitionStalled = false
         locale = loc
+        self.plan = plan
         dictationRetryAt = .distantPast
+        appendAppLog("nb.log", "[Voice] recognizer \(plan.statusText)")
+        let capture = plan.parakeetCommand ? VoiceCommandCapture() : nil
+        commandCapture = capture
+        if plan.parakeetCommand { Parakeet.shared.preload() }
 
         let a = VoiceAudio()
         let s = WakeSpotter()
@@ -340,7 +382,10 @@ final class VoiceEngine: ObservableObject {
             }
         }
 
-        a.onBuffer = { buf, _ in s.feed(buf) }
+        a.onBuffer = { buf, _ in
+            s.feed(buf)
+            capture?.append(buf)
+        }
 
         do {
             try a.start()
@@ -380,6 +425,8 @@ final class VoiceEngine: ObservableObject {
         audio              = nil
         spotter            = nil
         locale             = nil
+        plan               = nil
+        commandCapture     = nil
         listeningInput     = nil
         voiceSegmentActive = false
         backoff.reset()
@@ -421,6 +468,7 @@ final class VoiceEngine: ObservableObject {
     @discardableResult
     private func openWakeWindow(audio: VoiceAudio, spotter: WakeSpotter, locale: Locale) -> Bool {
         let preroll = audio.drainPreroll()
+        commandCapture?.begin(preroll: preroll)
         let started = spotter.beginWindow(locale: locale, preroll: preroll)
         if started {
             windowOpenedAt     = Date()
@@ -630,6 +678,8 @@ final class VoiceEngine: ObservableObject {
         isListeningForCommand = true
         commandTranscript     = ""
         lastWordCount         = 0
+        commandStartedAt      = Date()
+        wakeWords             = VoiceCommandText.wakeWordCount(in: transcript, coucou: VoiceSettings.coucouWake)
         // After "OK Coucou", leave time to start the sentence (the island no longer
         // opens, the caption shows "Je t'écoute…" instead). 3 s was too short.
         directInitialTimeout  = Self.wakeFirstWordTimeout
@@ -654,6 +704,7 @@ final class VoiceEngine: ObservableObject {
                 loggedDropWhileSpeaking = true
                 appendAppLog("nb.log", "[Voice] words heard while Coucou was speaking: ignored")
             }
+            commandCapture?.spoil()
             return
         }
         // The recognizer often repeats the same partial: no update, no re-render.
@@ -670,9 +721,11 @@ final class VoiceEngine: ObservableObject {
             let trimmed = command.trimmingCharacters(in: .whitespaces)
             let normTrimmed = WakePhrase.normalise(trimmed)
             if Self.cancelPhrases.contains(normTrimmed) {
+                commandCapture?.spoil()
                 endCommand(postFinished: true)
             } else if isInConversation && TurnEndPolicy.conversationEndPhrases.contains(normTrimmed) {
                 // Post voiceFinished with the end phrase so IslandWindowController can handle cleanup
+                commandCapture?.spoil()
                 endCommand(postFinished: true)
             }
         }
@@ -724,38 +777,64 @@ final class VoiceEngine: ObservableObject {
         spotter?.endWindow()
         restoreMusic()
         appendAppLog("nb.log", "[Voice] command end (had transcript: \(!commandTranscript.isEmpty))")
+        // A recognizer in another language can stay silent on Spanish, so no words is not
+        // silence. Real silence stays out: Parakeet would make a command of the wake word alone.
+        let spoke = (audio?.lastVoicedTime ?? .distantPast) > commandStartedAt.addingTimeInterval(0.3)
         if !postFinished { commandTranscript = "" }
         isListeningForCommand = false
+        let samples = commandCapture?.take()
         if postFinished {
             let cmd = commandTranscript
-            NotificationCenter.default.post(name: .voiceFinished,
-                                            object: cmd.isEmpty ? nil : cmd as NSString)
+            if let samples, !cmd.isEmpty || spoke {
+                writeWithParakeet(samples, recognizerWords: cmd, wakeWords: wakeWords)
+            } else {
+                postCommand(cmd)
+            }
+        }
+    }
+
+    private func postCommand(_ cmd: String) {
+        NotificationCenter.default.post(name: .voiceFinished,
+                                        object: cmd.isEmpty ? nil : cmd as NSString)
+    }
+
+    /// The turn goes on when Parakeet is done, or with the recognizer's words if it fails or
+    /// takes too long: a command is never lost to it.
+    private func writeWithParakeet(_ samples: [Float], recognizerWords: String, wakeWords: Int) {
+        nextCommandID += 1
+        let id = nextCommandID
+        pendingCommands.insert(id)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.parakeetCommandTimeout) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.pendingCommands.remove(id) != nil else { return }
+                appendAppLog("nb.log", "[Voice] Parakeet too slow, keeping the recognizer's words")
+                self.postCommand(recognizerWords)
+            }
+        }
+        Task { @MainActor [weak self] in
+            var heard: String?
+            do {
+                heard = try await Parakeet.shared.transcribe(samples)
+            } catch {
+                appendAppLog("nb.log", "[Voice] Parakeet failed: \(error.localizedDescription)")
+            }
+            guard let self, self.pendingCommands.remove(id) != nil else { return }
+            let words = heard?.split(separator: " ").count ?? 0
+            appendAppLog("nb.log", "[Voice] Parakeet command: \(samples.count / 16_000) s, \(words) words")
+            self.postCommand(VoiceCommandText.pick(parakeet: heard, recognizer: recognizerWords,
+                                                   wakeWords: wakeWords, coucou: VoiceSettings.coucouWake))
         }
     }
 
     // MARK: - Helpers
 
-    private func suitableLocale() -> Locale? {
-        // The language I speak (Settings → Voice → "You speak"): automatic = Spanish (this
-        // fork's language), then the Mac's dictation languages. The answer language is
-        // separate (VoiceSettings.language).
-        let spanish = [Locale(identifier: "es-MX"), Locale(identifier: "es-US"), Locale(identifier: "es-ES")]
-        var candidates: [Locale]
-        switch VoiceSettings.listenLanguage {
-        case "es": candidates = spanish
-        case "fr": candidates = [Locale(identifier: "fr-FR"), Locale(identifier: "fr-CA")]
-        case "en": candidates = [Locale(identifier: "en-US"), Locale(identifier: "en-GB"), Locale(identifier: "en-AU")]
-        default:   candidates = spanish
+    private func recognitionPlan() -> VoiceLocalePlan? {
+        let parakeet = FlowStore.shared.engine == .parakeet && Parakeet.shared.isReady
+        return VoiceLocalePlan.resolve(listenLanguage: VoiceSettings.listenLanguage, parakeet: parakeet) { id in
+            guard let r = SFSpeechRecognizer(locale: Locale(identifier: id)),
+                  r.supportsOnDeviceRecognition, r.isAvailable else { return nil }
+            return r.locale.identifier
         }
-        candidates += MacDictation.automaticLocales()
-        candidates += [Locale(identifier: "en-US"), Locale(identifier: "fr-FR")]
-        for locale in candidates {
-            if let r = SFSpeechRecognizer(locale: locale),
-               r.supportsOnDeviceRecognition, r.isAvailable {
-                return locale
-            }
-        }
-        return nil
     }
 
     // MARK: - System event observers

@@ -1493,6 +1493,7 @@ struct SettingsView: View {
                     .labelsHidden()
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 340)
+                    .onChange(of: listenLanguage) { _, _ in voiceEngine.reloadLanguage() }
                 }
                 HStack(spacing: 10) {
                     Text(String(localized: "voice.language"))

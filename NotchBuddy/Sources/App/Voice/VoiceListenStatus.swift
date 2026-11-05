@@ -48,10 +48,13 @@ enum VoiceListenStatus: Equatable {
     static func resolve(enabled: Bool, paused: Bool, recognizerUnavailable: Bool,
                         recognizer: RecognizerHealth, audioStartFailed: Bool,
                         recognitionStalled: Bool,
-                        input: VoiceInput?, locale: String?) -> VoiceListenStatus {
+                        input: VoiceInput?, locale: String?,
+                        wantedLocale: String? = nil) -> VoiceListenStatus {
         guard enabled else { return .off }
         if paused { return .notListening("En pausa") }
-        if recognizerUnavailable { return .notListening("Sin modelo de voz instalado") }
+        if recognizerUnavailable {
+            return .notListening(wantedLocale.map { "Sin modelo de voz para \($0) en este Mac" } ?? "Sin modelo de voz instalado")
+        }
         if recognizer.dictationDisabled {
             return .notListening("Dictado apagado: actívalo en Ajustes del Sistema → Teclado → Dictado")
         }
