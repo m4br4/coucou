@@ -257,7 +257,7 @@ final class VoiceEngine: ObservableObject {
 
     /// Locale of the language spoken — nil if the pipeline is not running, or when the
     /// recognizer only hears the wake word in another language.
-    var speechLocale: Locale? { plan?.wakeOnlyFor == nil ? locale : nil }
+    var speechLocale: Locale? { plan?.isWakeOnly == false ? locale : nil }
 
     // MARK: - Pipeline lifecycle
 
@@ -794,7 +794,7 @@ final class VoiceEngine: ObservableObject {
         let samples = commandCapture?.take()
         if postFinished {
             let cmd = commandTranscript
-            let wakeOnly = plan?.wakeOnlyFor != nil
+            let wakeOnly = plan?.isWakeOnly == true
             if let samples, !stopPhrase, !cmd.isEmpty || spoke {
                 writeWithParakeet(samples, recognizerWords: cmd, wakeOnly: wakeOnly, wakeWords: wakeWords)
             } else {

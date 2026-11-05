@@ -220,6 +220,16 @@ enum VoiceAudioTests {
             check("fr never listens in English without Parakeet", plan("fr", mac("en-US")) == nil)
             check("en never listens in Spanish without Parakeet", plan("en", mac("es-MX")) == nil)
             check("auto takes Spanish first", plan("auto", mac("es-MX", "en-US")) == Plan(locale: "es-MX"))
+            check("auto with Parakeet hears both languages",
+                  plan("auto", parakeet: true, mac("es-MX", "en-US"))
+                      == Plan(locale: "es-MX", parakeetCommand: true, bothLanguages: true))
+            check("auto with Parakeet and only English installed still hears both",
+                  plan("auto", parakeet: true, mac("en-US")) == Plan(locale: "en-US", parakeetCommand: true, bothLanguages: true))
+            check("a recognizer alone can't hear both", plan("auto", mac("es-MX"))?.isWakeOnly == false)
+            check("both languages leaves the recognizer to the wake word",
+                  plan("auto", parakeet: true, mac("es-MX"))?.isWakeOnly == true)
+            check("one language with its model is no wake only", plan("es", parakeet: true, mac("es-MX"))?.isWakeOnly == false)
+            check("no model is wake only", plan("es", parakeet: true, mac("en-US"))?.isWakeOnly == true)
             check("auto takes English without Spanish", plan("auto", mac("en-CA")) == Plan(locale: "en-CA"))
             check("auto with nothing installed", plan("auto", mac()) == nil)
             check("Parakeet writes the command in the chosen language",
@@ -231,6 +241,9 @@ enum VoiceAudioTests {
 
             check("line: plain locale", Plan(locale: "es-MX").statusText == "es-MX")
             check("line: Parakeet", Plan(locale: "es-MX", parakeetCommand: true).statusText == "es-MX · comando con Parakeet")
+            check("line: both languages",
+                  Plan(locale: "en-US", parakeetCommand: true, bothLanguages: true).statusText
+                      == "wake en-US · comando con Parakeet (es y en)")
             check("line: wake only says so",
                   Plan(locale: "en-US", wakeOnlyFor: "es-MX", parakeetCommand: true).statusText
                       == "wake en-US (sin modelo es-MX) · comando con Parakeet")
@@ -419,20 +432,19 @@ enum VoiceAudioTests {
             let anna       = V(id: "p.anna", name: "Anna", language: "de-DE", quality: .premium)
             let all = [samantha, thomas, monicaStd, paulinaStd, ava, spanish, monica, paulina, anna]
 
-            check("good voices first, Mexico and Spain ahead",
-                  S.offered(all, answerLanguage: "es") == [paulina, monica, spanish, ava, paulinaStd, monicaStd])
-            check("a Premium doesn't jump over Mexico's Enhanced",
-                  S.offered([ava, paulina], answerLanguage: "es") == [paulina, ava])
-            check("the answer language keeps its standard voices",
-                  S.offered([samantha, paulinaStd], answerLanguage: "en") == [paulinaStd, samantha])
-            check("standard voices of other languages stay out", !S.offered(all, answerLanguage: "es").contains(thomas))
-            check("languages Coucou never speaks stay out", !S.offered(all, answerLanguage: "es").contains(anna))
+            check("Spanish: good voices first, Mexico and Spain ahead",
+                  S.offered(all, language: "es") == [paulina, monica, spanish, paulinaStd, monicaStd])
+            check("English: only English", S.offered(all, language: "en") == [ava, samantha])
+            check("a Mexican Enhanced goes before a Spanish Premium",
+                  S.offered([monica, paulina], language: "es") == [paulina, monica])
+            check("a language with no voices", S.offered(all, language: "it").isEmpty)
+            check("a locale works as the language", S.offered(all, language: "en-GB") == [ava, samantha])
             check("same language, Premium before Enhanced",
                   S.offered([V(id: "a", name: "A", language: "es-MX", quality: .enhanced),
-                             V(id: "b", name: "B", language: "es-MX", quality: .premium)], answerLanguage: "es").first?.id == "b")
+                             V(id: "b", name: "B", language: "es-MX", quality: .premium)], language: "es").first?.id == "b")
             check("same quality and language: by name",
                   S.offered([V(id: "b", name: "Z", language: "es-MX", quality: .standard),
-                             V(id: "a", name: "A", language: "es-MX", quality: .standard)], answerLanguage: "es").first?.id == "a")
+                             V(id: "a", name: "A", language: "es-MX", quality: .standard)], language: "es").first?.id == "a")
 
             check("label with quality", paulina.label == "Paulina · es-MX · Enhanced")
             check("label of a standard voice", paulinaStd.label == "Paulina · es-MX · Estándar")
@@ -444,6 +456,26 @@ enum VoiceAudioTests {
             check("a voice speaks its region's sibling", S.voice(language: "es-MX", speaks: "es-ES"))
             check("underscores count", S.voice(language: "es-MX", speaks: "es_MX"))
             check("a voice doesn't speak another language", !S.voice(language: "es-MX", speaks: "fr-FR"))
+        }
+
+        // MARK: 10b. Language of an answer
+        do {
+            func language(_ text: String, _ fallback: String = "es-MX") -> String {
+                VoiceSpeech.language(of: text, fallback: fallback)
+            }
+            check("Spanish stays", language("Tienes tres reuniones pendientes para esta tarde") == "es-MX")
+            check("English in a Spanish turn", language("You have three meetings left this afternoon") == "en-US")
+            check("Spanish in an English turn", language("Tienes tres reuniones pendientes para esta tarde", "en-US") == "es-MX")
+            check("English stays", language("You have three meetings left this afternoon", "en-US") == "en-US")
+            check("the region of the fallback stays", language("Tienes tres reuniones pendientes para esta tarde", "es-ES") == "es-ES")
+            check("too short keeps the fallback", language("Hello there") == "es-MX")
+            check("one word keeps the fallback", language("Done") == "es-MX")
+            check("empty keeps the fallback", language("") == "es-MX")
+            check("numbers keep the fallback", language("10 20 30 40") == "es-MX")
+            check("French keeps its own voice", language("You have three meetings left this afternoon", "fr-FR") == "fr-FR")
+            check("a correction in English", language("Correction: say I went, not I go.") == "en-US")
+            check("a Jarvis answer in Spanish", language("Las ventas de HispanoHost subieron esta semana.") == "es-MX")
+            check("brand names don't flip Spanish", language("Abrí Spotify y puse tu playlist de Chill Vibes.") == "es-MX")
         }
 
         // MARK: 11. Local voices

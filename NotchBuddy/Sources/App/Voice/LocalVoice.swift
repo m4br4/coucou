@@ -92,7 +92,9 @@ final class LocalVoice: ObservableObject {
     /// The voice for this locale, nil when the Mac voice speaks instead.
     func voice(for locale: Locale?) -> VoiceSpeech.LocalVoice? {
         guard VoiceSettings.ttsEngine == "local", isReady, let locale else { return nil }
-        return VoiceSpeech.localVoice(language: locale.identifier, chosen: "", gender: VoiceSettings.elevenGender)
+        return VoiceSpeech.localVoice(language: locale.identifier,
+                                      chosen: VoiceSettings.localVoice(language: locale.identifier),
+                                      gender: VoiceSettings.elevenGender)
     }
 
     /// WAV audio, nil when the Mac voice should say it: never a long wait for a voice still loading.

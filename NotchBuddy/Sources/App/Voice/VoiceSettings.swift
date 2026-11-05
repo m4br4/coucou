@@ -96,9 +96,17 @@ enum VoiceSettings {
     static let speechRateKey = "voiceSpeechRate"
     static var speechRate: Double { VoiceSpeech.rate(stored: UserDefaults.standard.double(forKey: speechRateKey)) }
 
-    /// Identifier of the Mac voice picked in Settings → Voice. "": the best one per language.
-    static let macVoiceKey = "voiceMacVoice"
-    static var macVoice: String { UserDefaults.standard.string(forKey: macVoiceKey) ?? "" }
+    /// Voice picked per language in Settings → Voice. "": the best one, by gender.
+    static let macVoiceEsKey    = "voiceMacVoice"
+    static let macVoiceEnKey    = "voiceMacVoiceEn"
+    static let localVoiceEsKey  = "voiceLocalVoiceEs"
+    static let localVoiceEnKey  = "voiceLocalVoiceEn"
+    static func macVoice(language: String) -> String {
+        UserDefaults.standard.string(forKey: language.hasPrefix("en") ? macVoiceEnKey : macVoiceEsKey) ?? ""
+    }
+    static func localVoice(language: String) -> String {
+        UserDefaults.standard.string(forKey: language.hasPrefix("en") ? localVoiceEnKey : localVoiceEsKey) ?? ""
+    }
 
     /// Claude is Coucou's brain (the user's Anthropic API key): what I say after
     /// "OK Coucou" goes to Claude, which acts with Coucou's tools and searches the web.

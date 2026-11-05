@@ -55,6 +55,7 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     /// Adds a sentence to the queue. Starts playing if nothing is playing.
     func enqueue(_ text: String, locale: Locale?) {
         guard VoiceSettings.speakEnabled else { return }
+        let locale = locale.map { Locale(identifier: VoiceSpeech.language(of: text, fallback: $0.identifier)) }
         if ElevenLabsTTS.isActive {
             // ElevenLabs phrases a whole sentence itself.
             queue.append(Item(text: text, locale: locale, audio: Task { await ElevenLabsTTS.shared.audio(for: text) }))
@@ -169,8 +170,8 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
 
     /// The voice picked in Settings, if it is still installed and speaks this language.
     private static func chosenVoice(for locale: Locale) -> AVSpeechSynthesisVoice? {
-        guard !VoiceSettings.macVoice.isEmpty,
-              let v = AVSpeechSynthesisVoice(identifier: VoiceSettings.macVoice),
+        let id = VoiceSettings.macVoice(language: locale.identifier)
+        guard !id.isEmpty, let v = AVSpeechSynthesisVoice(identifier: id),
               VoiceSpeech.voice(language: v.language, speaks: locale.identifier) else { return nil }
         return v
     }

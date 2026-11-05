@@ -1400,7 +1400,10 @@ struct SettingsView: View {
     @AppStorage("voicePitchFemale")    private var pitchFemale: Double = VoiceSettings.defaultPitchFemale
     @AppStorage("voicePitchMale")      private var pitchMale: Double = VoiceSettings.defaultPitchMale
     @AppStorage(VoiceSettings.speechRateKey) private var speechRate: Double = VoiceSpeech.defaultRate
-    @AppStorage(VoiceSettings.macVoiceKey)   private var macVoice: String = ""
+    @AppStorage(VoiceSettings.macVoiceEsKey)   private var macVoiceEs: String = ""
+    @AppStorage(VoiceSettings.macVoiceEnKey)   private var macVoiceEn: String = ""
+    @AppStorage(VoiceSettings.localVoiceEsKey) private var localVoiceEs: String = ""
+    @AppStorage(VoiceSettings.localVoiceEnKey) private var localVoiceEn: String = ""
     @State private var macVoices: [VoiceSpeech.Voice] = []
     @State private var webKeySaved: Bool = !(KeychainStore.shared.get("anthropic-api-key") ?? "").isEmpty
     @State private var elevenKeyDraft: String = ""
@@ -1587,24 +1590,21 @@ struct SettingsView: View {
                     }
                 }
 
+                if ttsEngine == "local" {
+                    localVoicePicker("Voz en español", language: "es", selection: $localVoiceEs)
+                    localVoicePicker("Voz en inglés", language: "en", selection: $localVoiceEn)
+                }
+
                 if ttsEngine == "system" {
-                    HStack(spacing: 8) {
-                        Text(verbatim: "Voz del Mac")
-                        Picker(selection: $macVoice) {
-                            Text(verbatim: "Automática").tag("")
-                            ForEach(macVoices) { Text(verbatim: $0.label).tag($0.id) }
-                        } label: {
-                            Text(verbatim: "Voz del Mac")
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 260)
-                        .onChange(of: macVoice) { _, _ in speakVoiceSample() }
+                    VStack(alignment: .leading, spacing: 6) {
+                        macVoicePicker("Voz en español", language: "es", selection: $macVoiceEs)
+                        macVoicePicker("Voz en inglés", language: "en", selection: $macVoiceEn)
                     }
                     .onAppear { reloadMacVoices() }
                     .onReceive(NotificationCenter.default.publisher(for: AVSpeechSynthesizer.availableVoicesDidChangeNotification)) { _ in
                         reloadMacVoices()
                     }
-                    if !VoiceSpeech.hasGoodVoice(macVoices) {
+                    if !VoiceSpeech.hasGoodVoice(VoiceSpeech.offered(macVoices, language: "es") + VoiceSpeech.offered(macVoices, language: "en")) {
                         Text(verbatim: "No hay voces Enhanced ni Premium instaladas: Accesibilidad → Contenido leído → Voz del sistema → Gestionar voces.")
                             .font(.system(size: 11))
                             .foregroundColor(.orange)
@@ -1640,7 +1640,42 @@ struct SettingsView: View {
 
     #if !APPSTORE
     private func reloadMacVoices() {
-        macVoices = VoiceSpeech.offered(VoiceSpeaker.macVoices(), answerLanguage: voiceLanguage)
+        macVoices = VoiceSpeaker.macVoices()
+    }
+
+    private func macVoicePicker(_ title: String, language: String, selection: Binding<String>) -> some View {
+        voicePicker(title, language: language, selection: selection) {
+            ForEach(VoiceSpeech.offered(macVoices, language: language)) { Text(verbatim: $0.label).tag($0.id) }
+        }
+    }
+
+    private func localVoicePicker(_ title: String, language: String, selection: Binding<String>) -> some View {
+        voicePicker(title, language: language, selection: selection) {
+            ForEach(VoiceSpeech.localVoices.filter { $0.language == language }) { Text(verbatim: $0.name).tag($0.id) }
+        }
+    }
+
+    private func voicePicker<Voices: View>(_ title: String, language: String, selection: Binding<String>,
+                                           @ViewBuilder voices: () -> Voices) -> some View {
+        HStack(spacing: 8) {
+            Text(verbatim: title)
+                .frame(width: 100, alignment: .leading)
+            Picker(selection: selection) {
+                Text(verbatim: "Automática").tag("")
+                voices()
+            } label: {
+                Text(verbatim: title)
+            }
+            .labelsHidden()
+            .frame(maxWidth: 260)
+            .onChange(of: selection.wrappedValue) { _, _ in
+                if language == "en" {
+                    VoiceSpeaker.shared.speak("Hi, this is how I sound in English.", locale: Locale(identifier: "en-US"))
+                } else {
+                    speakVoiceSample()
+                }
+            }
+        }
     }
 
     private func localModelStatusLabel(_ status: LocalModelStatus) -> String {

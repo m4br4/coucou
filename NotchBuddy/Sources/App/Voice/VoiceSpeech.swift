@@ -1,9 +1,10 @@
 import Foundation
+import NaturalLanguage
 
 // MARK: - VoiceSpeech
 //
-// How the Mac voice says things: its speed, where it breathes, which voices are on offer.
-// No AVFoundation dependency — testable with standalone swiftc.
+// How Coucou says things: its speed, where it breathes, in which language, which voices are on
+// offer. No AVFoundation dependency — testable with standalone swiftc.
 
 enum VoiceSpeech {
 
@@ -112,16 +113,11 @@ enum VoiceSpeech {
         var label: String { "\(plainName) · \(language) · \(quality.label)" }
     }
 
-    /// The voices worth offering, best first: Enhanced and Premium, then the rest, each with
-    /// Mexico, Spain and other Spanish ahead. `answerLanguage` keeps the standard voices of the
-    /// language Coucou answers in; Spanish always stays, Jarvis answers in it.
-    static func offered(_ voices: [Voice], answerLanguage: String) -> [Voice] {
+    /// The voices of a language, best first: Enhanced and Premium, then the rest, each with
+    /// Mexico and Spain ahead among the Spanish ones.
+    static func offered(_ voices: [Voice], language: String) -> [Voice] {
         voices
-            .filter { v in
-                let language = code(of: v.language)
-                return v.quality > .standard ? ["es", "en", "fr"].contains(language)
-                                             : ["es", answerLanguage].contains(language)
-            }
+            .filter { code(of: $0.language) == code(of: language) }
             .sorted { a, b in
                 let ka = (a.quality > .standard ? 0 : 1, languageRank(a.language), -a.quality.rawValue)
                 let kb = (b.quality > .standard ? 0 : 1, languageRank(b.language), -b.quality.rawValue)
@@ -146,6 +142,24 @@ enum VoiceSpeech {
     /// A chosen voice only speaks its own language: Paulina can't read an answer in French.
     static func voice(language: String, speaks wanted: String) -> Bool {
         code(of: language) == code(of: wanted)
+    }
+
+    // MARK: Language of an answer
+
+    private static let minWordsToDetect = 3
+    private static let minConfidence = 0.8
+
+    /// The language an answer is really in, so each language gets its own voice: Spanish or
+    /// English, as a locale. Too short or unclear keeps `fallback`, and so does any other
+    /// language: there is no second voice to pick there.
+    static func language(of text: String, fallback: String) -> String {
+        guard ["es", "en"].contains(code(of: fallback)), wordCount(text) >= minWordsToDetect else { return fallback }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.languageConstraints = [.spanish, .english]
+        recognizer.processString(text)
+        guard let (detected, confidence) = recognizer.languageHypotheses(withMaximum: 1).first,
+              confidence >= minConfidence, detected.rawValue != code(of: fallback) else { return fallback }
+        return detected == .spanish ? "es-MX" : "en-US"
     }
 
     // MARK: Local voices

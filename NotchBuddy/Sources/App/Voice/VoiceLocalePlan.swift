@@ -15,6 +15,12 @@ struct VoiceLocalePlan: Equatable, Sendable {
     var wakeOnlyFor: String? = nil
     /// Parakeet writes the command, the recognizer only follows the sentence.
     var parakeetCommand = false
+    /// "You speak" is automatic and Parakeet hears both languages. A recognizer only hears one,
+    /// so it is left to the wake word here too.
+    var bothLanguages = false
+
+    /// The recognizer's words can't be trusted as the command.
+    var isWakeOnly: Bool { wakeOnlyFor != nil || bothLanguages }
 
     /// The locales for a "You speak" value, best first. Never the Mac's language: on a Mac
     /// set to English it would answer "es" with English.
@@ -35,15 +41,18 @@ struct VoiceLocalePlan: Equatable, Sendable {
                         onDevice: (String) -> String?) -> VoiceLocalePlan? {
         let wanted = candidates(for: listenLanguage)
         if let locale = wanted.lazy.compactMap(onDevice).first {
-            return VoiceLocalePlan(locale: locale, parakeetCommand: parakeet)
+            return VoiceLocalePlan(locale: locale, parakeetCommand: parakeet,
+                                   bothLanguages: parakeet && listenLanguage == "auto")
         }
         // Without Parakeet the command would come out in another language: better not to listen.
         guard parakeet, let locale = candidates(for: "auto").lazy.compactMap(onDevice).first else { return nil }
-        return VoiceLocalePlan(locale: locale, wakeOnlyFor: wanted.first, parakeetCommand: true)
+        return VoiceLocalePlan(locale: locale, wakeOnlyFor: wanted.first, parakeetCommand: true,
+                               bothLanguages: listenLanguage == "auto")
     }
 
     /// The end of the "Escuchando" line.
     var statusText: String {
+        if bothLanguages { return "wake \(locale) · comando con Parakeet (es y en)" }
         let hearing = wakeOnlyFor.map { "wake \(locale) (sin modelo \($0))" } ?? locale
         return parakeetCommand ? "\(hearing) · comando con Parakeet" : hearing
     }
